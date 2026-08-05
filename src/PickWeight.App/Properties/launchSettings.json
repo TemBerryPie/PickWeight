@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "PickWeight.App (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "PickWeight.App (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

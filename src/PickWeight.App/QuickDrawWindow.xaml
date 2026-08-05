@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Window
+    x:Class="PickWeight_App.QuickDrawWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="快捷启动">
+    <Border
+        x:Name="WindowRoot"
+        Background="Transparent"
+        AutomationProperties.Name="点击立即点名，拖动移动窗口"
+        CornerRadius="16"
+        Loaded="WindowRoot_Loaded"
+        ManipulationDelta="WindowRoot_ManipulationDelta"
+        ManipulationMode="TranslateX,TranslateY"
+        ManipulationStarted="WindowRoot_ManipulationStarted"
+        PointerCanceled="WindowRoot_PointerCanceled"
+        PointerCaptureLost="WindowRoot_PointerCaptureLost"
+        PointerMoved="WindowRoot_PointerMoved"
+        PointerPressed="WindowRoot_PointerPressed"
+        PointerReleased="WindowRoot_PointerReleased"
+        Tapped="WindowRoot_Tapped">
+        <Border.ContextFlyout>
+            <MenuFlyout>
+                <MenuFlyoutItem Click="QuickDrawMenu_Draw_Click" Text="立即点名" />
+                <MenuFlyoutItem Click="QuickDrawMenu_ShowMain_Click" Text="打开主窗口" />
+                <MenuFlyoutItem Click="QuickDrawMenu_Move_Click" Text="移动" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem Click="QuickDrawMenu_Hide_Click" Text="隐藏小窗" />
+            </MenuFlyout>
+        </Border.ContextFlyout>
+        <FontIcon
+            x:Name="DrawIcon"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center"
+            FontSize="30"
+            Glyph="&#xE77B;"
+            IsHitTestVisible="False" />
+    </Border>
+</Window>

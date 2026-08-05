@@ -1,0 +1,15 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PickWeight.App/PickWeight.App.csproj" />
+    <Project Path="src/PickWeight.Launcher/PickWeight.Launcher.csproj" />
+    <Project Path="src/PickWeight.ClassIsland.Protocol/PickWeight.ClassIsland.Protocol.csproj" />
+    <Project Path="src/PickWeight.Core/PickWeight.Core.csproj" />
+    <Project Path="src/PickWeight.Tray/PickWeight.Tray.csproj" />
+    <Project Path="PickWeight ClassIsland/PickWeight.ClassIsland.Plugin.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PickWeight.ClassIsland.Protocol.Tests/PickWeight.ClassIsland.Protocol.Tests.csproj" />
+    <Project Path="tests/PickWeight.App.Tests/PickWeight.App.Tests.csproj" />
+    <Project Path="tests/PickWeight.Core.Tests/PickWeight.Core.Tests.csproj" />
+  </Folder>
+</Solution>

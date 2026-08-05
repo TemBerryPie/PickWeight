@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Window
+    x:Class="PickWeight_App.TrayMenuWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="PickWeight 菜单">
+    <Grid
+        x:Name="WindowRoot"
+        Background="{ThemeResource LayerFillColorDefaultBrush}"
+        KeyDown="WindowRoot_KeyDown">
+        <Border
+            x:Name="MenuSurface"
+            Padding="4"
+            Background="{ThemeResource LayerFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="8">
+            <StackPanel x:Name="MenuItemsPanel" />
+        </Border>
+    </Grid>
+</Window>

@@ -1,0 +1,13 @@
+**/bin/
+**/obj/
+.vs/
+*.user
+*.suo
+AppPackages/
+BundleArtifacts/
+Generated Files/
+**/cipx/
+
+# Runtime roster/configuration must never be committed.
+**/implicit_config.json
+dist/*.txt

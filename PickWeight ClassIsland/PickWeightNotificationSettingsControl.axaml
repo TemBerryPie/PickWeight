@@ -1,0 +1,51 @@
+<ci:NotificationProviderControlBase
+    x:Class="PickWeight.ClassIsland.Plugin.PickWeightNotificationSettingsControl"
+    x:TypeArguments="local:PickWeightNotificationSettings"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ci="http://classisland.tech/schemas/xaml/core"
+    xmlns:local="clr-namespace:PickWeight.ClassIsland.Plugin">
+    <ScrollViewer>
+        <StackPanel
+            Margin="0"
+            Classes="settings-container animated-intro"
+            DataContext="{Binding RelativeSource={RelativeSource FindAncestor, AncestorType=local:PickWeightNotificationSettingsControl}}"
+            Spacing="8">
+            <TextBlock
+                FontSize="18"
+                FontWeight="SemiBold"
+                Text="PickWeight 提醒显示" />
+            <TextBlock
+                Margin="0,0,0,8"
+                Opacity="0.7"
+                Text="音效、特效、置顶和提醒总开关可在此提醒提供方的通用设置中配置。"
+                TextWrapping="Wrap" />
+
+            <ci:Field Label="遮罩显示时长" Suffix="秒">
+                <NumericUpDown
+                    MinWidth="150"
+                    Minimum="0.5"
+                    Maximum="120"
+                    Value="{Binding Settings.MaskDurationSeconds, Mode=TwoWay}" />
+            </ci:Field>
+            <ci:Field Label="正文显示时长" Suffix="秒">
+                <NumericUpDown
+                    MinWidth="150"
+                    Minimum="0.5"
+                    Maximum="120"
+                    Value="{Binding Settings.OverlayDurationSeconds, Mode=TwoWay}" />
+            </ci:Field>
+
+            <CheckBox
+                Content="显示正文"
+                IsChecked="{Binding Settings.ShowOverlay, Mode=TwoWay}" />
+            <CheckBox
+                Content="播报遮罩中的抽中名单"
+                IsChecked="{Binding Settings.IsMaskSpeechEnabled, Mode=TwoWay}" />
+            <CheckBox
+                Content="播报正文中的抽中名单"
+                IsChecked="{Binding Settings.IsOverlaySpeechEnabled, Mode=TwoWay}"
+                IsEnabled="{Binding Settings.ShowOverlay}" />
+        </StackPanel>
+    </ScrollViewer>
+</ci:NotificationProviderControlBase>

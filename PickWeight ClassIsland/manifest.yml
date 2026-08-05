@@ -1,0 +1,9 @@
+id: PickWeight.ClassIsland
+name: PickWeight 点名提醒
+description: 在 ClassIsland 主界面显示 PickWeight 抽取结果。
+entranceAssembly: "PickWeight.ClassIsland.Plugin.dll"
+version: 0.2.0.0
+apiVersion: 2.0.4
+author: PickWeight
+supportedOSPlatforms:
+  - WINDOWS
