@@ -42,6 +42,19 @@
                     <AppBarButton Command="{Binding ClearHistoryCommand}" Icon="Delete" Label="清除历史" />
                 </CommandBar>
 
+                <StackPanel x:Name="ArchiveSection" Orientation="Horizontal" Spacing="12">
+                    <ToggleSwitch
+                        Header="包含归档数据"
+                        IsOn="{Binding IncludeArchived, Mode=TwoWay}"
+                        OffContent="关闭"
+                        OnContent="开启" />
+                    <TextBlock
+                        VerticalAlignment="Center"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="勾选后合并展示超过保留天数、已归档到 archive 文件夹的历史记录。"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+
                 <StackPanel x:Name="SummarySection" Spacing="8">
                     <TextBlock Style="{ThemeResource SubtitleTextBlockStyle}" Text="概览" />
                     <ItemsControl ItemsSource="{Binding OverviewStatistics}">

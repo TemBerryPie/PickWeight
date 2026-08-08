@@ -101,21 +101,21 @@ public sealed class GlobalHotkeyService : IDisposable
     internal static bool TryParse(string? value, out uint virtualKey)
     {
         virtualKey = 0;
-        var parts = (value ?? string.Empty)
-            .Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (parts.Length != 3 || !parts.Contains("Ctrl", StringComparer.OrdinalIgnoreCase) || !parts.Contains("Alt", StringComparer.OrdinalIgnoreCase))
+        var definition = PickWeight_App.Models.HotkeyDefinition.TryParse(value);
+        if (definition is null || !definition.IsValid)
         {
             return false;
         }
 
-        var key = parts.SingleOrDefault(part => !part.Equals("Ctrl", StringComparison.OrdinalIgnoreCase) && !part.Equals("Alt", StringComparison.OrdinalIgnoreCase));
-        if (key is { Length: 1 } && char.IsAsciiLetter(key[0]))
+        // 注册仍固定使用 Ctrl+Alt 修饰键，主键支持字母/数字/F1-F12
+        if (!definition.Modifiers.Contains(PickWeight_App.Models.HotkeyModifier.Ctrl)
+            || !definition.Modifiers.Contains(PickWeight_App.Models.HotkeyModifier.Alt))
         {
-            virtualKey = char.ToUpperInvariant(key[0]);
-            return true;
+            return false;
         }
 
-        return false;
+        virtualKey = (uint)definition.Key.VirtualKey;
+        return true;
     }
 
     [DllImport("user32.dll", SetLastError = true)]

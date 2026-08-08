@@ -8,6 +8,9 @@ public interface IClassIslandNotificationBridge
     Task<ClassIslandSendResult> ShowDrawResultAsync(
         IEnumerable<string> names,
         CancellationToken cancellationToken = default);
+
+    /// <summary>查询当前课时上下文。插件未连接或版本不匹配时返回失败结果。</summary>
+    Task<ClassContextResult> QueryClassContextAsync(CancellationToken cancellationToken = default);
 }
 
 public sealed class ClassIslandNotificationBridge : IClassIslandNotificationBridge
@@ -28,4 +31,7 @@ public sealed class ClassIslandNotificationBridge : IClassIslandNotificationBrid
             ? Task.FromResult(new ClassIslandSendResult(true))
             : _client.SendDrawResultAsync(names, cancellationToken);
     }
+
+    public Task<ClassContextResult> QueryClassContextAsync(CancellationToken cancellationToken = default) =>
+        _client.QueryContextAsync(cancellationToken);
 }

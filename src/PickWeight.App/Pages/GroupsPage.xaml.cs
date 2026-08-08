@@ -47,14 +47,15 @@ public sealed partial class GroupsPage : Page
         }
 
         viewModel.ResetAvailableMemberSearch();
+        viewModel.SelectedAvailableMembers.Clear();
         var searchBox = new TextBox
         {
             Header = "搜索成员",
-            PlaceholderText = "输入姓名后显示可加入的成员"
+            PlaceholderText = "输入关键字过滤成员"
         };
         var hint = new TextBlock
         {
-            Text = "输入姓名关键字以搜索成员；未搜索时不会显示完整名单。",
+            Text = "勾选要加入的成员，或输入关键字过滤。",
             TextWrapping = TextWrapping.Wrap
         };
         var noResults = new TextBlock
@@ -66,18 +67,72 @@ public sealed partial class GroupsPage : Page
         var candidates = new ListView
         {
             ItemsSource = viewModel.FilteredAvailableMembers,
-            SelectionMode = ListViewSelectionMode.Extended,
+            SelectionMode = ListViewSelectionMode.Multiple,
+            IsMultiSelectCheckBoxEnabled = true,
             MaxHeight = 360
         };
+
+        // 刷新期间由 ViewModel 重填列表导致的选中清除是程序性变化，
+        // 不应覆盖 SelectedAvailableMembers；用户手动勾选才同步集合。
+        var refreshing = false;
+        void RestoreSelection()
+        {
+            refreshing = true;
+            try
+            {
+                candidates.SelectedItems.Clear();
+                foreach (var name in viewModel.FilteredAvailableMembers)
+                {
+                    if (viewModel.SelectedAvailableMembers.Contains(name))
+                    {
+                        candidates.SelectedItems.Add(name);
+                    }
+                }
+            }
+            finally
+            {
+                refreshing = false;
+            }
+        }
+
+        void SyncSelectionToViewModel()
+        {
+            if (refreshing)
+            {
+                return;
+            }
+
+            viewModel.SelectedAvailableMembers.Clear();
+            foreach (var item in candidates.SelectedItems)
+            {
+                if (item is string name)
+                {
+                    viewModel.SelectedAvailableMembers.Add(name);
+                }
+            }
+        }
+
         void RefreshSearchState()
         {
-            hint.Visibility = viewModel.HasAvailableMemberSearchQuery ? Visibility.Collapsed : Visibility.Visible;
             noResults.Visibility = viewModel.HasAvailableMemberSearchQuery && !viewModel.HasAvailableMembers
                 ? Visibility.Visible
                 : Visibility.Collapsed;
         }
 
-        searchBox.TextChanged += (_, _) => viewModel.AvailableMemberSearchText = searchBox.Text;
+        candidates.SelectionChanged += (_, _) => SyncSelectionToViewModel();
+        viewModel.AvailableMembersRefreshed += RestoreSelection;
+        searchBox.TextChanged += (_, _) =>
+        {
+            refreshing = true;
+            try
+            {
+                viewModel.AvailableMemberSearchText = searchBox.Text;
+            }
+            finally
+            {
+                refreshing = false;
+            }
+        };
         PropertyChangedEventHandler stateChanged = (_, args) =>
         {
             if (args.PropertyName is nameof(GroupsPageViewModel.HasAvailableMemberSearchQuery)
@@ -109,13 +164,15 @@ public sealed partial class GroupsPage : Page
         {
             if (await dialog.ShowAsync() == ContentDialogResult.Primary)
             {
-                viewModel.AddMembers(candidates.SelectedItems);
+                viewModel.AddMembers();
             }
         }
         finally
         {
             viewModel.PropertyChanged -= stateChanged;
+            viewModel.AvailableMembersRefreshed -= RestoreSelection;
             viewModel.ResetAvailableMemberSearch();
+            viewModel.SelectedAvailableMembers.Clear();
         }
     }
 

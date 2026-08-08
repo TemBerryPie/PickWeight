@@ -52,11 +52,47 @@ public static class MemberRules
         member.IsWeightLinked = false;
     }
 
+    /// <summary>
+    /// 课堂表现评价的默认权重倍率。良好下调权重（给其他同学更多机会），
+    /// 一般轻微下调权重，未答上与主动回答（已停用）不调整权重。
+    /// </summary>
+    public static double? RatingMultiplier(DrawRating rating) => rating switch
+    {
+        DrawRating.Excellent => 0.7d,
+        DrawRating.Fair => 0.9d,
+        DrawRating.NoAnswer or DrawRating.Volunteered => 1d,
+        _ => null
+    };
+
+    /// <summary>
+    /// 按课堂表现评价调整显式权重，并标记 <see cref="Member.IsWeightAdjustedByRating"/>。
+    /// 权重下限为默认权重的 10%，避免评价把成员权重压到无法参与抽取。
+    /// </summary>
+    public static void ApplyRatingAdjustment(Member member, DrawRating rating, double multiplier)
+    {
+        ArgumentNullException.ThrowIfNull(member);
+
+        if (rating is not (DrawRating.Excellent or DrawRating.Fair))
+        {
+            return;
+        }
+
+        var normalizedMultiplier = Math.Clamp(
+            double.IsFinite(multiplier) ? multiplier : 1d,
+            0d,
+            MaximumWeight);
+        member.ExplicitWeight = Math.Max(
+            DefaultExplicitWeight * 0.1d,
+            Math.Min(MaximumWeight, member.ExplicitWeight * normalizedMultiplier));
+        member.IsWeightAdjustedByRating = true;
+    }
+
     public static void Reset(Member member)
     {
         member.ExplicitWeight = DefaultExplicitWeight;
         member.CalledCount = 0;
         member.IsWeightLinked = true;
+        member.IsWeightAdjustedByRating = false;
     }
 
     public static void Validate(Member member)

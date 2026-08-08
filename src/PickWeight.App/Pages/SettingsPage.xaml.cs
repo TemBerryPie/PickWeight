@@ -1,5 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Navigation;
+using PickWeight_App.Pages.Settings;
 using PickWeight_App.Services;
 using PickWeight_App.ViewModels;
 
@@ -14,8 +16,6 @@ public sealed partial class SettingsPage : Page
         InitializeComponent();
         _viewModel = App.GetService<SettingsPageViewModel>();
         DataContext = _viewModel;
-        _viewModel.PreviewAnimationRequested += PreviewAnimation;
-        Unloaded += SettingsPage_Unloaded;
         Loaded += (_, _) => PlayPageEntrance();
     }
 
@@ -28,6 +28,8 @@ public sealed partial class SettingsPage : Page
         {
             SystemCategoryCard,
             DrawCategoryCard,
+            RatingCategoryCard,
+            HistoryArchiveCategoryCard,
             NotificationCategoryCard,
             AppearanceCategoryCard
         };
@@ -37,55 +39,54 @@ public sealed partial class SettingsPage : Page
         }
     }
 
-    private async void SystemCategoryCard_Click(object sender, RoutedEventArgs e) =>
-        await ShowSettingsDialogAsync(SystemSettingsDialog);
+    private void SystemCategoryCard_Click(object sender, RoutedEventArgs e) =>
+        OpenSettingsPage(typeof(SystemSettingsPage));
 
-    private async void DrawCategoryCard_Click(object sender, RoutedEventArgs e) =>
-        await ShowSettingsDialogAsync(DrawSettingsDialog);
+    private void DrawCategoryCard_Click(object sender, RoutedEventArgs e) =>
+        OpenSettingsPage(typeof(DrawSettingsPage));
 
-    private async void NotificationCategoryCard_Click(object sender, RoutedEventArgs e) =>
-        await ShowSettingsDialogAsync(NotificationSettingsDialog);
+    private void RatingCategoryCard_Click(object sender, RoutedEventArgs e) =>
+        OpenSettingsPage(typeof(RatingSettingsPage));
 
-    private async void AppearanceCategoryCard_Click(object sender, RoutedEventArgs e) =>
-        await ShowSettingsDialogAsync(AppearanceSettingsDialog);
+    private void HistoryArchiveCategoryCard_Click(object sender, RoutedEventArgs e) =>
+        OpenSettingsPage(typeof(HistoryArchiveSettingsPage));
 
-    private async void FirstRunWizard_Click(object sender, RoutedEventArgs e)
+    private void NotificationCategoryCard_Click(object sender, RoutedEventArgs e) =>
+        OpenSettingsPage(typeof(NotificationSettingsPage));
+
+    private void AppearanceCategoryCard_Click(object sender, RoutedEventArgs e) =>
+        OpenSettingsPage(typeof(AppearanceSettingsPage));
+
+    /// <summary>
+    /// 在 SettingsFrame 中打开二级设置页，并把本页持有的 SettingsPageViewModel
+    /// 作为导航参数传入，保证所有子页共享同一实例（Transient 直接 DI 会拿到不同实例）。
+    /// </summary>
+    private void OpenSettingsPage(Type pageType)
     {
-        SystemSettingsDialog.Hide();
-        await App.GetService<FirstRunWizardService>().ShowAsync(XamlRoot, markCompleted: false);
+        // 清空当前内容，避免 Frame.Navigate 把上一个子页压入 BackStack，
+        // 导致从子页返回时回到上一个子页而非卡片列表。
+        SettingsFrame.Content = null;
+        SettingsFrame.BackStack.Clear();
+        SettingsFrame.ForwardStack.Clear();
+        SettingsFrame.Navigate(pageType, _viewModel);
+        // 同类型复用导航可能不触发 Navigated，这里显式切换视图
+        SettingsListScrollViewer.Visibility = Visibility.Collapsed;
+        SettingsFrame.Visibility = Visibility.Visible;
     }
 
-    private async void ShowLocalApiToken_Click(object sender, RoutedEventArgs e)
+    private void SettingsFrame_Navigated(object sender, NavigationEventArgs e)
     {
-        var tokenBox = new TextBox
-        {
-            Header = "X-PickWeight-Token",
-            IsReadOnly = true,
-            Text = App.GetService<PickWeight.Core.Abstractions.ISettingsService>().Current.LocalApiToken
-        };
-        var panel = new StackPanel { Spacing = 8 };
-        panel.Children.Add(new TextBlock { Text = "仅供本机 OBS 或自动化脚本使用，请勿公开。", TextWrapping = TextWrapping.Wrap });
-        panel.Children.Add(tokenBox);
-        var dialog = new ContentDialog { XamlRoot = XamlRoot, Title = "本地 API 令牌", Content = panel, CloseButtonText = "关闭" };
-        await dialog.ShowAsync();
+        var showingChild = SettingsFrame.Content is not null;
+        SettingsListScrollViewer.Visibility = showingChild ? Visibility.Collapsed : Visibility.Visible;
+        SettingsFrame.Visibility = showingChild ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private async Task ShowSettingsDialogAsync(ContentDialog dialog)
+    /// <summary>子页返回时切回卡片列表视图。</summary>
+    internal void ReturnToCardList()
     {
-        dialog.XamlRoot = XamlRoot;
-        await dialog.ShowAsync();
-    }
-
-    private void SettingsDialog_Opened(ContentDialog sender, ContentDialogOpenedEventArgs args)
-    {
-        App.GetService<AnimationService>().PlayPopupEntrance(sender);
-    }
-
-    private void PreviewAnimation() => PlayPageEntrance();
-
-    private void SettingsPage_Unloaded(object sender, RoutedEventArgs e)
-    {
-        _viewModel.PreviewAnimationRequested -= PreviewAnimation;
-        Unloaded -= SettingsPage_Unloaded;
+        SettingsFrame.BackStack.Clear();
+        SettingsFrame.ForwardStack.Clear();
+        SettingsListScrollViewer.Visibility = Visibility.Visible;
+        SettingsFrame.Visibility = Visibility.Collapsed;
     }
 }

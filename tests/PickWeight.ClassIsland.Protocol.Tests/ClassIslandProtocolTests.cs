@@ -87,3 +87,90 @@ public sealed class ClassIslandProtocolTests
             [new string('a', ClassIslandProtocol.MaximumNameLength + 1)])
     };
 }
+
+public sealed class ClassIslandContextProtocolTests
+{
+    [Fact]
+    public void CreateContextQueryRequest_IsValid()
+    {
+        var request = ClassIslandProtocol.CreateContextQueryRequest();
+
+        Assert.Null(ClassIslandProtocol.Validate(request));
+        Assert.Equal(ClassIslandProtocol.ContextQueryType, request.Type);
+        Assert.Equal(ClassIslandProtocol.Version, request.Version);
+    }
+
+    [Fact]
+    public void Validate_ContextQuery_RejectsWrongVersion()
+    {
+        var request = new ContextQueryRequest(1, ClassIslandProtocol.ContextQueryType);
+
+        Assert.Equal(ClassIslandProtocol.VersionMismatchError, ClassIslandProtocol.Validate(request));
+    }
+
+    [Fact]
+    public async Task ReadRequestEnvelopeAsync_ExtractsTypeField()
+    {
+        await using var stream = new MemoryStream();
+        var request = ClassIslandProtocol.CreateContextQueryRequest();
+        await ClassIslandProtocol.WriteAsync(stream, request);
+        stream.Position = 0;
+
+        var envelope = await ClassIslandProtocol.ReadRequestEnvelopeAsync(stream);
+
+        Assert.Equal(ClassIslandProtocol.ContextQueryType, envelope.Type);
+        var deserialized = envelope.Deserialize<ContextQueryRequest>();
+        Assert.NotNull(deserialized);
+        Assert.Equal(ClassIslandProtocol.Version, deserialized!.Version);
+    }
+
+    [Fact]
+    public async Task ReadRequestEnvelopeAsync_HandlesLowercaseTypeField()
+    {
+        await using var stream = new MemoryStream();
+        var payload = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new { version = 2, type = "draw-result", names = new[] { "张三" } });
+        var length = BitConverter.GetBytes(payload.Length);
+        await stream.WriteAsync(length);
+        await stream.WriteAsync(payload);
+        stream.Position = 0;
+
+        var envelope = await ClassIslandProtocol.ReadRequestEnvelopeAsync(stream);
+
+        Assert.Equal("draw-result", envelope.Type);
+        var deserialized = envelope.Deserialize<DrawResultRequest>();
+        Assert.NotNull(deserialized);
+        Assert.Equal(["张三"], deserialized!.Names);
+    }
+
+    [Fact]
+    public async Task PipeClient_QueryContext_ReceivesContextResponse()
+    {
+        var pipeName = $"PickWeight.ClassIsland.ContextTests.{Guid.NewGuid():N}";
+        var serverTask = Task.Run(async () =>
+        {
+            await using var server = new NamedPipeServerStream(
+                pipeName,
+                PipeDirection.InOut,
+                1,
+                PipeTransmissionMode.Byte,
+                PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+            await server.WaitForConnectionAsync();
+            var envelope = await ClassIslandProtocol.ReadRequestEnvelopeAsync(server);
+            Assert.Equal(ClassIslandProtocol.ContextQueryType, envelope.Type);
+            var request = envelope.Deserialize<ContextQueryRequest>();
+            Assert.Null(ClassIslandProtocol.Validate(request));
+            await ClassIslandProtocol.WriteAsync(
+                server,
+                new ClassContextResponse(true, new ClassContext("语文", 3, true, DateTimeOffset.Now)),
+                CancellationToken.None);
+        });
+
+        var client = new ClassIslandPipeClient(TimeSpan.FromSeconds(5), pipeName);
+        var result = await client.QueryContextAsync();
+        await serverTask;
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("语文", result.Context?.Subject);
+        Assert.Equal(3, result.Context?.PeriodIndex);
+    }
+}

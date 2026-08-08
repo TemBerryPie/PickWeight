@@ -5,6 +5,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:ViewModels="using:PickWeight_App.ViewModels"
     mc:Ignorable="d">
     <Grid>
         <VisualStateManager.VisualStateGroups>
@@ -41,7 +42,7 @@
                     <TextBlock Style="{ThemeResource TitleTextBlockStyle}" Text="成员管理" />
                     <TextBlock
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="成员列表仅显示姓名和启用状态；点击编辑图标维护资料、权重和被点次数。"
+                        Text="成员列表保持轻量，仅显示姓名、被点热度和启用开关；点击编辑图标维护资料、权重和被点次数。"
                         TextWrapping="Wrap" />
                 </StackPanel>
 
@@ -49,6 +50,7 @@
                     <AppBarButton Click="AddMember_Click" Icon="Add" Label="新增成员" />
                     <AppBarButton Command="{Binding ImportCommand}" Icon="OpenFile" Label="导入名单" />
                     <AppBarButton Command="{Binding ImportExcelCommand}" Icon="OpenFile" Label="导入 Excel" />
+                    <AppBarButton Click="PasteImport_Click" Icon="Paste" Label="粘贴导入" />
                     <AppBarButton Command="{Binding ExportCommand}" Icon="SaveLocal" Label="导出" />
                     <AppBarSeparator />
                     <AppBarButton Click="EnableSelected_Click" Icon="Accept" Label="启用所选" />
@@ -60,12 +62,22 @@
                     <AppBarButton Command="{Binding ResetCommand}" Icon="Refresh" Label="重置成员数据" />
                 </CommandBar>
 
-                <TextBox
-                    x:Name="SearchSection"
-                    Grid.Row="2"
-                    Header="搜索姓名"
-                    PlaceholderText="输入姓名关键字"
-                    Text="{Binding SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                <Grid x:Name="SearchSection" Grid.Row="2" ColumnSpacing="10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <ComboBox
+                        MinWidth="140"
+                        Header="排序"
+                        ItemsSource="{x:Bind ViewModels:MembersPageViewModel.SortOptions, Mode=OneWay}"
+                        SelectedIndex="{Binding SortOptionIndex, Mode=TwoWay}" />
+                    <TextBox
+                        Grid.Column="1"
+                        Header="搜索姓名"
+                        PlaceholderText="输入姓名关键字"
+                        Text="{Binding SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                </Grid>
 
                 <Grid x:Name="ListSection" Grid.Row="3" RowSpacing="8">
                     <Grid.RowDefinitions>
@@ -107,14 +119,20 @@
                         Visibility="{Binding MembersListVisibility}">
                         <ListView.ItemTemplate>
                             <DataTemplate>
-                                <Grid MinHeight="56" Padding="8,6" ColumnSpacing="10">
+                                <Grid MinHeight="68" Padding="8,6" ColumnSpacing="12" RowSpacing="6">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <Button
+                                        Grid.RowSpan="2"
                                         Padding="8"
+                                        VerticalAlignment="Center"
                                         AutomationProperties.Name="编辑成员"
                                         Click="EditMember_Click"
                                         Tag="{Binding}">
@@ -126,7 +144,15 @@
                                         FontWeight="SemiBold"
                                         Text="{Binding Name}"
                                         TextTrimming="CharacterEllipsis" />
+                                    <ProgressBar
+                                        Grid.Row="1"
+                                        Grid.Column="1"
+                                        VerticalAlignment="Center"
+                                        Maximum="100"
+                                        Minimum="0"
+                                        Value="{Binding HeatBarValue, Mode=OneWay}" />
                                     <ToggleSwitch
+                                        Grid.RowSpan="2"
                                         Grid.Column="2"
                                         VerticalAlignment="Center"
                                         AutomationProperties.Name="启用成员"
@@ -142,3 +168,4 @@
         </ScrollViewer>
     </Grid>
 </Page>
+

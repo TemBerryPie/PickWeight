@@ -34,6 +34,11 @@ public partial class SettingsPageViewModel : ObservableObject
     [ObservableProperty] private double animationSpeed;
     [ObservableProperty] private double animationMotionScale;
     [ObservableProperty] private double animationBounceScale;
+    [ObservableProperty] private bool ratingAffectsWeight;
+    [ObservableProperty] private double ratingWeightMultiplier = 0.7d;
+    [ObservableProperty] private double ratingFairMultiplier = 0.9d;
+    [ObservableProperty] private double historyRetentionDays = 180d;
+    [ObservableProperty] private bool historyIncludeArchived;
     [ObservableProperty] private string statusMessage = string.Empty;
     [ObservableProperty] private InfoBarSeverity statusSeverity = InfoBarSeverity.Informational;
     [ObservableProperty] private bool isSaving;
@@ -83,6 +88,11 @@ public partial class SettingsPageViewModel : ObservableObject
     partial void OnAnimationSpeedChanged(double value) => MarkChanged(debounce: true);
     partial void OnAnimationMotionScaleChanged(double value) => MarkChanged(debounce: true);
     partial void OnAnimationBounceScaleChanged(double value) => MarkChanged(debounce: true);
+    partial void OnRatingAffectsWeightChanged(bool value) => MarkChanged();
+    partial void OnRatingWeightMultiplierChanged(double value) => MarkChanged(debounce: true);
+    partial void OnRatingFairMultiplierChanged(double value) => MarkChanged(debounce: true);
+    partial void OnHistoryRetentionDaysChanged(double value) => MarkChanged(debounce: true);
+    partial void OnHistoryIncludeArchivedChanged(bool value) => MarkChanged();
 
     [RelayCommand]
     private async Task RestoreDefaultsAsync()
@@ -186,6 +196,11 @@ public partial class SettingsPageViewModel : ObservableObject
         AnimationSpeed = settings.AnimationSpeed;
         AnimationMotionScale = settings.AnimationMotionScale;
         AnimationBounceScale = settings.AnimationBounceScale;
+        RatingAffectsWeight = settings.RatingAffectsWeight;
+        RatingWeightMultiplier = settings.RatingWeightMultiplier;
+        RatingFairMultiplier = settings.RatingFairMultiplier;
+        HistoryRetentionDays = settings.HistoryRetentionDays;
+        HistoryIncludeArchived = settings.HistoryIncludeArchived;
         _isLoading = false;
         OnPropertyChanged(nameof(IsAcrylicSelected));
         OnPropertyChanged(nameof(IsAutoResetIntervalEnabled));
@@ -208,5 +223,10 @@ public partial class SettingsPageViewModel : ObservableObject
         settings.AnimationSpeed = Math.Clamp(AnimationSpeed, 0.5d, 2d);
         settings.AnimationMotionScale = Math.Clamp(AnimationMotionScale, 0d, 2d);
         settings.AnimationBounceScale = Math.Clamp(AnimationBounceScale, 0d, 2d);
+        settings.RatingAffectsWeight = RatingAffectsWeight;
+        settings.RatingWeightMultiplier = Math.Clamp(RatingWeightMultiplier, 0.1d, 1d);
+        settings.RatingFairMultiplier = Math.Clamp(RatingFairMultiplier, 0.1d, 1d);
+        settings.HistoryRetentionDays = Math.Clamp((int)Math.Round(HistoryRetentionDays), 1, 3650);
+        settings.HistoryIncludeArchived = HistoryIncludeArchived;
     }
 }

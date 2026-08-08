@@ -21,6 +21,7 @@ public sealed partial class HistoryPage : Page
         {
             HeaderSection,
             CommandSection,
+            ArchiveSection,
             SummarySection,
             StatusSection,
             HistoryContentSection

@@ -7,10 +7,12 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     x:Name="PageRoot"
     mc:Ignorable="d">
-    <Grid>
+    <Grid KeyDown="PageRoot_KeyDown">
         <ScrollViewer HorizontalContentAlignment="Stretch" HorizontalScrollBarVisibility="Disabled" HorizontalScrollMode="Disabled">
             <Grid MaxWidth="1000" Padding="20,24" RowSpacing="18">
                 <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
@@ -20,9 +22,69 @@
                 <StackPanel x:Name="HeaderSection" Spacing="6">
                     <TextBlock Style="{ThemeResource TitleTextBlockStyle}" Text="开始点名" />
                     <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{Binding CandidateSummary}" TextWrapping="Wrap" />
+                    <Grid
+                        ColumnSpacing="10"
+                        Visibility="{Binding RoundProgressVisibility}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock
+                            x:Name="RoundProgressLabel"
+                            VerticalAlignment="Center"
+                            FontSize="12"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="{Binding RoundProgressText}" />
+                        <ProgressBar
+                            Grid.Column="1"
+                            Height="6"
+                            VerticalAlignment="Center"
+                            Maximum="100"
+                            Value="{Binding RoundProgressValue}" />
+                        <Button
+                            Grid.Column="2"
+                            Padding="10,4"
+                            Command="{Binding StartNextRoundCommand}"
+                            Content="重开一轮"
+                            FontSize="12" />
+                    </Grid>
                 </StackPanel>
 
-                <StackPanel x:Name="ActionSection" Grid.Row="1" Spacing="10">
+                <Expander
+                    x:Name="AttendanceSection"
+                    Grid.Row="1"
+                    Header="{Binding AttendanceSummary}"
+                    HorizontalAlignment="Stretch"
+                    IsExpanded="False">
+                    <StackPanel Padding="0,10,0,0" Spacing="8">
+                        <ItemsControl ItemsSource="{Binding AttendanceMembers}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <VariableSizedWrapGrid MaximumRowsOrColumns="8" Orientation="Horizontal" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <ToggleButton
+                                        MinWidth="56"
+                                        Margin="0,0,6,6"
+                                        Padding="10,6"
+                                        AutomationProperties.Name="切换请假状态"
+                                        Content="{Binding Name}"
+                                        IsChecked="{Binding IsAbsent, Mode=TwoWay}" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <Button
+                            HorizontalAlignment="Left"
+                            Command="{Binding MarkAllPresentCommand}"
+                            Content="全部到齐"
+                            FontSize="12" />
+                    </StackPanel>
+                </Expander>
+
+                <StackPanel x:Name="ActionSection" Grid.Row="2" Spacing="10">
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <ComboBox Width="220" DisplayMemberPath="Name" ItemsSource="{Binding DrawPresets}" PlaceholderText="选择抽取预设" SelectedItem="{Binding SelectedDrawPreset, Mode=TwoWay}" />
                         <Button Click="ApplyPreset_Click" Content="应用预设" />
@@ -34,30 +96,55 @@
                         Command="{Binding DrawCommand}"
                         Content="开始抽取"
                         Style="{ThemeResource AccentButtonStyle}" />
+                    <Button
+                        HorizontalAlignment="Stretch"
+                        Click="ViewSeatMap_Click"
+                        Content="查看所在座位"
+                        IsEnabled="{Binding HasSelectedResults}"
+                        Visibility="{Binding HasSeatMapVisibility}" />
                     <StackPanel HorizontalAlignment="Left" Orientation="Horizontal" Spacing="8">
                         <Button Click="RulesButton_Click" Content="规则和概率" />
-                        <Button Click="PresentationDraw_Click" Content="投影抽取" />
                         <Button Command="{Binding DiscardCurrentDrawCommand}" Content="丢弃本次" />
                     </StackPanel>
                 </StackPanel>
 
                 <InfoBar
+                    x:Name="FairnessReminderSection"
+                    Grid.Row="3"
+                    CloseButtonClick="FairnessReminder_CloseButtonClick"
+                    IsClosable="True"
+                    IsOpen="{Binding HasFairnessReminder}"
+                    Message="{Binding FairnessReminderText}"
+                    Severity="Informational"
+                    Title="公平性提醒（关闭 = 忽略）">
+                    <InfoBar.ActionButton>
+                        <Button Command="{Binding BoostForThisDrawCommand}" Content="本次优先" />
+                    </InfoBar.ActionButton>
+                </InfoBar>
+
+                <InfoBar
                     x:Name="StatusSection"
-                    Grid.Row="2"
+                    Grid.Row="4"
                     IsClosable="False"
                     IsOpen="{Binding HasStatus}"
                     Message="{Binding StatusMessage}"
                     Severity="Informational" />
 
-                <Grid Grid.Row="3" RowSpacing="10">
+                <Grid Grid.Row="5" RowSpacing="10">
                     <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
                     <TextBlock Style="{ThemeResource SubtitleTextBlockStyle}" Text="本次结果" />
+                    <TextBlock
+                        Grid.Row="1"
+                        FontSize="12"
+                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                        Text="快捷键：空格 抽取 · 1-4 切换模式 · +/- 人数 · R 换一个" />
                     <ListView
                         x:Name="ResultsList"
-                        Grid.Row="1"
+                        Grid.Row="2"
                         ContainerContentChanging="ResultsList_ContainerContentChanging"
                         ItemsSource="{Binding Results}"
                         ScrollViewer.VerticalScrollBarVisibility="Disabled"
@@ -88,15 +175,61 @@
                                                 <TextBlock Foreground="{ThemeResource TextFillColorTertiaryBrush}" Text="{Binding StateText}" TextWrapping="Wrap" />
                                             </StackPanel>
                                         </Button>
-                                        <Button
-                                            Grid.Column="1"
-                                            Width="44"
-                                            Height="44"
-                                            VerticalAlignment="Center"
-                                            Command="{Binding DiscardCommand}"
-                                            ToolTipService.ToolTip="丢弃此结果">
-                                            <SymbolIcon Symbol="Delete" />
-                                        </Button>
+                                        <Grid Grid.Column="1" VerticalAlignment="Center" RowSpacing="8" ColumnSpacing="6">
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Button
+                                                Grid.Row="0"
+                                                Grid.Column="0"
+                                                Width="44"
+                                                Height="44"
+                                                Command="{Binding ReplaceCommand}"
+                                                ToolTipService.ToolTip="换一个（重抽一人替换）">
+                                                <FontIcon FontSize="16" Glyph="&#xE72C;" />
+                                            </Button>
+                                            <Button
+                                                Grid.Row="0"
+                                                Grid.Column="1"
+                                                Width="44"
+                                                Height="44"
+                                                Command="{Binding DiscardCommand}"
+                                                ToolTipService.ToolTip="丢弃此结果">
+                                                <SymbolIcon Symbol="Delete" />
+                                            </Button>
+                                            <Button
+                                                Grid.Row="1"
+                                                Grid.Column="0"
+                                                Width="44"
+                                                Height="44"
+                                                Command="{Binding RateGoodCommand}"
+                                                ToolTipService.ToolTip="良好">
+                                                <FontIcon FontSize="18" Glyph="&#xE19F;" />
+                                            </Button>
+                                            <Button
+                                                Grid.Row="1"
+                                                Grid.Column="1"
+                                                Width="44"
+                                                Height="44"
+                                                Command="{Binding RateFairCommand}"
+                                                ToolTipService.ToolTip="一般">
+                                                <FontIcon FontSize="18" Glyph="&#xE73E;" />
+                                            </Button>
+                                            <TextBlock
+                                                Grid.Row="2"
+                                                Grid.ColumnSpan="2"
+                                                HorizontalAlignment="Center"
+                                                FontSize="12"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                Text="{Binding RatingText}"
+                                                Visibility="{Binding HasRating}" />
+                                        </Grid>
                                     </Grid>
                                 </Border>
                             </DataTemplate>
@@ -133,6 +266,24 @@
                             <ComboBox Header="排除小组" ItemsSource="{Binding GroupFilterOptions}" SelectedIndex="{Binding ExcludeGroupFilterIndex, Mode=TwoWay}" />
                             <NumberBox Header="排除最近抽取记录数" Minimum="0" SpinButtonPlacementMode="Inline" Value="{Binding ExcludeRecentDrawCount, Mode=TwoWay}" />
                             <ToggleSwitch Header="只抽从未出现在历史中的成员" IsOn="{Binding OnlyNeverDrawn, Mode=TwoWay}" />
+                            <ToggleSwitch
+                                Header="一轮不重复（本轮已点成员不再抽取）"
+                                IsOn="{Binding NoRepeatInRound, Mode=TwoWay}"
+                                OffContent="关闭"
+                                OnContent="开启" />
+                            <ComboBox Header="按座位范围" ItemsSource="{Binding SeatRegionOptions}" SelectedIndex="{Binding SelectedSeatRegionIndex, Mode=TwoWay}" />
+                            <NumberBox
+                                Header="指定列（1 起，靠门侧为 1）"
+                                Minimum="1"
+                                SpinButtonPlacementMode="Inline"
+                                Value="{Binding SeatColumnNumber, Mode=TwoWay}"
+                                Visibility="{Binding SeatColumnVisibility}" />
+                            <NumberBox
+                                Header="指定排（1 起，每列独立计数）"
+                                Minimum="1"
+                                SpinButtonPlacementMode="Inline"
+                                Value="{Binding SeatRowNumber, Mode=TwoWay}"
+                                Visibility="{Binding SeatRowVisibility}" />
                         </StackPanel>
                     </TabViewItem>
                     <TabViewItem Header="人员概率概览" IsClosable="False">

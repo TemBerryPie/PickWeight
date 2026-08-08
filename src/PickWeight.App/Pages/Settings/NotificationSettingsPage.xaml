@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="PickWeight_App.Pages.Settings.NotificationSettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid Padding="24" RowSpacing="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <StackPanel x:Name="HeaderPanel" Orientation="Horizontal" Spacing="12">
+            <Button
+                AutomationProperties.Name="返回设置"
+                Background="Transparent"
+                Click="BackButton_Click"
+                Padding="10"
+                ToolTipService.ToolTip="返回">
+                <FontIcon FontSize="16" Glyph="&#xE72B;" />
+            </Button>
+            <StackPanel VerticalAlignment="Center" Spacing="2">
+                <TextBlock Style="{ThemeResource TitleTextBlockStyle}" Text="通知" />
+                <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="抽取结果通知、ClassIsland 提醒" TextWrapping="Wrap" />
+            </StackPanel>
+        </StackPanel>
+
+        <ScrollViewer
+            Grid.Row="1"
+            HorizontalAlignment="Stretch"
+            HorizontalContentAlignment="Stretch"
+            HorizontalScrollBarVisibility="Disabled"
+            HorizontalScrollMode="Disabled">
+            <StackPanel x:Name="ContentPanel" MaxWidth="860" Spacing="16">
+                <ToggleSwitch Header="抽取结果通知" IsOn="{Binding ShowDrawNotifications, Mode=TwoWay}" OffContent="关闭" OnContent="开启" />
+                <ToggleSwitch Header="ClassIsland 抽取提醒" IsOn="{Binding ShowClassIslandNotifications, Mode=TwoWay}" OffContent="关闭" OnContent="开启" />
+                <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="ClassIsland 未连接时，点名结果仍会正常保存。" TextWrapping="Wrap" />
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Page>

@@ -44,14 +44,14 @@ public partial class App : Application
     public App()
     {
         InitializeComponent();
+        UnhandledException += OnUnhandledException;
 
         var dataDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "PickWeight");
         var services = new ServiceCollection();
         services.AddSingleton<IStateStore>(new JsonStateStore(Path.Combine(dataDirectory, "state.json")));
-        services.AddSingleton<IImplicitWeightProvider>(new JsonImplicitWeightProvider(
-            Path.Combine(AppContext.BaseDirectory, "implicit_config.json")));
+        services.AddSingleton<IImplicitWeightProviderFactory, JsonImplicitWeightProviderFactory>();
         services.AddSingleton<IDrawService, DrawService>();
         services.AddSingleton<IMemberImportExportService, MemberImportExportService>();
         services.AddSingleton<IMemberSpreadsheetImportService, ExcelMemberImportService>();
@@ -59,6 +59,7 @@ public partial class App : Application
         services.AddSingleton<IHistoryExportService, HistoryExportService>();
         services.AddSingleton<AppDataService>();
         services.AddSingleton<ISettingsService, SettingsService>();
+        services.AddSingleton<IDrawExecutionCoordinator, DrawExecutionCoordinator>();
         services.AddSingleton<AnimationService>();
         services.AddSingleton<ThemeService>();
         services.AddSingleton<StartupService>();
@@ -71,6 +72,7 @@ public partial class App : Application
         services.AddSingleton<ObsOverlayService>();
         services.AddSingleton<LocalApiService>();
         services.AddSingleton<IClassIslandNotificationBridge, ClassIslandNotificationBridge>();
+        services.AddSingleton<ClassIslandPeriodService>();
         services.AddSingleton<IDrawExecutionService, DrawExecutionService>();
         services.AddSingleton<FileDialogService>();
         services.AddSingleton<DialogService>();
@@ -80,6 +82,7 @@ public partial class App : Application
         services.AddTransient<MembersPageViewModel>();
         services.AddTransient<GroupsPageViewModel>();
         services.AddTransient<SettingsPageViewModel>();
+        services.AddTransient<SeatMapPageViewModel>();
         Services = services.BuildServiceProvider();
     }
 
@@ -98,6 +101,7 @@ public partial class App : Application
         Services.GetRequiredService<StartupService>().Apply();
         await Services.GetRequiredService<AppLogService>().InfoAsync("Application started.");
         Services.GetRequiredService<LocalApiService>().Start();
+        Services.GetRequiredService<ClassIslandPeriodService>().Start();
         Services.GetRequiredService<ThemeService>().Apply();
         var quickDraw = Services.GetRequiredService<QuickDrawWindowService>();
         quickDraw.QuickDrawRequested = PrepareQuickDrawAsync;
@@ -127,13 +131,59 @@ public partial class App : Application
         }
     }
 
+    /// <summary>
+    /// Last-resort guard for exceptions that escape an <c>async void</c> event
+    /// handler. Without this the WinUI message loop fail-fasts and the window
+    /// simply vanishes, which gives the user no idea what went wrong.
+    /// </summary>
+    private void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
+    {
+        var exception = e.Exception;
+        e.Handled = true;
+
+        try
+        {
+            _ = Services.GetRequiredService<AppLogService>()
+                .InfoAsync($"Unhandled exception: {exception}");
+        }
+        catch
+        {
+            // Diagnostics must never mask the original failure.
+        }
+
+        try
+        {
+            DispatcherQueue?.TryEnqueue(async () =>
+            {
+                if (Window?.Content is not FrameworkElement { XamlRoot: { } root })
+                {
+                    return;
+                }
+
+                var dialog = new Microsoft.UI.Xaml.Controls.ContentDialog
+                {
+                    XamlRoot = root,
+                    Title = "发生意外错误",
+                    Content = $"操作未能完成，应用会继续运行。\n\n{exception.Message}",
+                    CloseButtonText = "确定"
+                };
+                await dialog.ShowAsync();
+            });
+        }
+        catch
+        {
+            // If we cannot even show the dialog, staying alive still beats crashing.
+        }
+    }
+
     private static async Task<QuickDrawPresentation?> PrepareQuickDrawAsync(CancellationToken cancellationToken)
     {
         var execution = GetService<IDrawExecutionService>();
         var settings = GetService<ISettingsService>();
+        var targetCount = Math.Max(1, settings.Current.DrawTargetCount);
         var prepared = await execution.PrepareAsync(
             new DrawExecutionRequest(
-                TargetCount: 1,
+                TargetCount: targetCount,
                 Filters: new PickWeight.Core.Models.DrawFilterOptions(
                     settings.Current.DrawIncludeGroupName,
                     settings.Current.DrawExcludeGroupName,
@@ -142,15 +192,25 @@ public partial class App : Application
                 Mode: settings.Current.DrawMode,
                 AutoCommitSelection: true),
             cancellationToken);
-        var selected = prepared.SelectedMembers.FirstOrDefault();
-        if (selected is null)
+        var selected = prepared.SelectedMembers;
+        if (selected.Count == 0)
         {
+            await execution.DiscardAsync(prepared, CancellationToken.None);
             return null;
         }
 
+        // 滚动池取全班启用成员姓名，让滚动观感更丰富；空则窗口内回退候选名。
+        var rollingNames = GetService<AppDataService>()
+            .ActiveClassroom.Members
+            .Where(member => member.IsActive)
+            .Select(member => member.Name)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .ToList();
+
         return new QuickDrawPresentation(
             prepared.CandidateNames,
-            selected.Name,
+            selected.Select(member => member.Name).ToList(),
+            rollingNames,
             async token =>
             {
                 await execution.CommitAsync(prepared, confirmSelection: true, cancellationToken: token);

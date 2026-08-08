@@ -106,6 +106,59 @@ public sealed partial class MembersPage : Page
         if (DataContext is MembersPageViewModel viewModel) await viewModel.RedoAsync();
     }
 
+    private async void PasteImport_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MembersPageViewModel viewModel)
+        {
+            return;
+        }
+
+        var inputBox = new TextBox
+        {
+            AcceptsReturn = true,
+            Header = "粘贴名单",
+            Height = 180,
+            PlaceholderText = "每行一个姓名，支持「1. 张三」「01 张三」「(1) 张三」等编号前缀",
+            TextWrapping = TextWrapping.Wrap
+        };
+        var previewText = new TextBlock
+        {
+            Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+            TextWrapping = TextWrapping.Wrap
+        };
+        var panel = new StackPanel { Spacing = 10, MinWidth = 420 };
+        panel.Children.Add(inputBox);
+        panel.Children.Add(previewText);
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = "粘贴导入名单",
+            Content = panel,
+            PrimaryButtonText = "导入",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Close
+        };
+        dialog.Opened += (_, _) => App.GetService<AnimationService>().PlayPopupEntrance(dialog);
+
+        void UpdatePreview()
+        {
+            var normalized = FairnessService.NormalizePastedLines(inputBox.Text);
+            var preview = viewModel.PreviewImport(normalized);
+            previewText.Text = $"将新增 {preview.AddCount} 人，跳过 {preview.SkipCount} 行。";
+        }
+
+        inputBox.TextChanged += (_, _) => UpdatePreview();
+        UpdatePreview();
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        await viewModel.PasteImportAsync(inputBox.Text);
+    }
+
     private async Task ShowMemberEditorAsync(MemberRowViewModel? member)
     {
         if (DataContext is not MembersPageViewModel viewModel)
@@ -118,6 +171,12 @@ public sealed partial class MembersPage : Page
             Header = "姓名",
             Text = member?.Name ?? string.Empty,
             PlaceholderText = "输入成员姓名"
+        };
+        var studentIdBox = new TextBox
+        {
+            Header = "学号",
+            Text = member?.StudentId ?? string.Empty,
+            PlaceholderText = "选填，用于区分重名成员"
         };
         var genderOptions = new[]
         {
@@ -153,6 +212,46 @@ public sealed partial class MembersPage : Page
             SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline,
             Value = member?.CalledCount ?? 0
         };
+        var noteBox = new TextBox
+        {
+            Header = "备注",
+            Text = member?.Note ?? string.Empty,
+            PlaceholderText = "选填，例如英语课代表"
+        };
+        var absentToggle = new ToggleSwitch
+        {
+            Header = "今日请假",
+            IsOn = member?.IsAbsentToday ?? false,
+            OffContent = "正常",
+            OnContent = "请假"
+        };
+        var seatLink = new HyperlinkButton { Content = "前往座位表" };
+        seatLink.Click += async (_, _) =>
+        {
+            // 走主壳导航：同步 NavigationView 选中态并触发未保存确认，避免绕过主壳直接切换页面。
+            if (App.Window is MainWindow mainWindow)
+            {
+                var highlight = member?.Name is { Length: > 0 } name
+                    ? new[] { name }
+                    : Array.Empty<string>();
+                await mainWindow.NavigateToSeatMapAsync(highlight);
+            }
+        };
+        var seatSection = new StackPanel { Spacing = 6 };
+        seatSection.Children.Add(new TextBlock
+        {
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Text = "座位"
+        });
+        var seatRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+        seatRow.Children.Add(new TextBlock
+        {
+            Text = member?.SeatText ?? string.Empty,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextWrapping = TextWrapping.Wrap
+        });
+        seatRow.Children.Add(seatLink);
+        seatSection.Children.Add(seatRow);
         var validationText = new TextBlock
         {
             TextWrapping = TextWrapping.Wrap,
@@ -174,9 +273,13 @@ public sealed partial class MembersPage : Page
 
         var content = new StackPanel { Spacing = 14 };
         content.Children.Add(nameBox);
+        content.Children.Add(studentIdBox);
         content.Children.Add(genderBox);
         content.Children.Add(weightBox);
         content.Children.Add(calledCountBox);
+        content.Children.Add(noteBox);
+        content.Children.Add(absentToggle);
+        content.Children.Add(seatSection);
         content.Children.Add(readOnlyDetails);
         content.Children.Add(validationText);
 
@@ -197,7 +300,7 @@ public sealed partial class MembersPage : Page
                 return;
             }
 
-            if (viewModel.TryValidateMemberName(member, nameBox.Text, out var error))
+            if (viewModel.TryValidateMemberName(member, nameBox.Text, out var error, studentIdBox.Text))
             {
                 return;
             }
@@ -216,11 +319,26 @@ public sealed partial class MembersPage : Page
         var calledCount = ToCalledCount(calledCountBox.Value);
         if (member is null)
         {
-            await viewModel.AddMemberAsync(nameBox.Text, gender, weightBox.Value, calledCount);
+            await viewModel.AddMemberAsync(
+                nameBox.Text,
+                gender,
+                weightBox.Value,
+                calledCount,
+                studentIdBox.Text,
+                noteBox.Text,
+                absentToggle.IsOn);
         }
         else
         {
-            await viewModel.UpdateMemberAsync(member, nameBox.Text, gender, weightBox.Value, calledCount);
+            await viewModel.UpdateMemberAsync(
+                member,
+                nameBox.Text,
+                gender,
+                weightBox.Value,
+                calledCount,
+                studentIdBox.Text,
+                noteBox.Text,
+                absentToggle.IsOn);
         }
     }
 

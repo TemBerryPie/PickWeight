@@ -4,11 +4,15 @@ namespace PickWeight.Core.Services;
 
 public static class AutoResetService
 {
-    public static bool RecordSuccessfulDraw(AppState state)
+    /// <summary>
+    /// 记录一次成功抽取。达到间隔时重置传入名单的权重与被点次数。
+    /// 设置是全局的，名单则来自当前班级。
+    /// </summary>
+    public static bool RecordSuccessfulDraw(AppSettings settings, IEnumerable<Member> members)
     {
-        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(members);
 
-        var settings = state.Settings;
         if (!settings.AutoResetWeights)
         {
             return false;
@@ -22,7 +26,7 @@ public static class AutoResetService
             return false;
         }
 
-        foreach (var member in state.Members)
+        foreach (var member in members)
         {
             MemberRules.Reset(member);
         }

@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using PickWeight.Core.Abstractions;
 using PickWeight.Core.Models;
+using PickWeight.Core.Services;
 using PickWeight_App.Services;
 
 namespace PickWeight_App.ViewModels;
@@ -42,6 +43,10 @@ public partial class HistoryPageViewModel : ObservableObject
     [ObservableProperty] private int selectedGroupFilterIndex;
     [ObservableProperty] private string emptyStateTitle = "暂无抽取历史";
     [ObservableProperty] private string emptyStateDescription = "完成一次点名后，这里会显示记录和统计。";
+    [ObservableProperty] private bool includeArchived;
+    [ObservableProperty] private double fairnessIndex;
+    [ObservableProperty] private string fairnessDescription = string.Empty;
+    [ObservableProperty] private string fairnessIndexText = "100";
 
     public bool HasStatus => !string.IsNullOrWhiteSpace(StatusMessage);
     public bool HasAnyHistory => _allHistory.Count > 0;
@@ -74,16 +79,32 @@ public partial class HistoryPageViewModel : ObservableObject
         Reload();
     }
 
+    /// <summary>归档完成后刷新数据，让勾选「包含归档数据」的统计保持最新。</summary>
+    private void Data_HistoryArchived(object? sender, EventArgs e)
+    {
+        if (IncludeArchived)
+        {
+            Reload();
+        }
+    }
+
     partial void OnStatusMessageChanged(string value) => OnPropertyChanged(nameof(HasStatus));
     partial void OnStartDateChanged(DateTimeOffset? value) => ApplyFilters();
     partial void OnEndDateChanged(DateTimeOffset? value) => ApplyFilters();
     partial void OnSelectedMemberFilterIndexChanged(int value) => ApplyFilters();
     partial void OnSelectedGroupFilterIndexChanged(int value) => ApplyFilters();
+    partial void OnIncludeArchivedChanged(bool value) => Reload();
 
     public void Reload()
     {
+        // 订阅只在导航重建 VM 时发生一次；AppDataService 是单例，旧 VM 会被整体替换
+        _data.HistoryArchived -= Data_HistoryArchived;
+        _data.HistoryArchived += Data_HistoryArchived;
         _isReloading = true;
-        _allHistory = _data.State.DrawHistory
+        var source = IncludeArchived
+            ? LoadCombinedHistory()
+            : _data.ActiveClassroom.DrawHistory;
+        _allHistory = source
             .OrderByDescending(entry => entry.DrawnAt)
             .Select(entry => entry.Clone())
             .ToList();
@@ -92,6 +113,13 @@ public partial class HistoryPageViewModel : ObservableObject
         SelectedGroupFilterIndex = Math.Clamp(SelectedGroupFilterIndex, 0, Math.Max(0, GroupFilterOptions.Count - 1));
         _isReloading = false;
         ApplyFilters();
+    }
+
+    /// <summary>合并主文件历史与归档历史（归档部分按时间升序追加，避免打乱时序）。</summary>
+    private IEnumerable<DrawHistoryEntry> LoadCombinedHistory()
+    {
+        var archived = _data.LoadArchivedHistoryAsync().GetAwaiter().GetResult();
+        return archived.Concat(_data.ActiveClassroom.DrawHistory);
     }
 
     private void RebuildFilterOptions()
@@ -110,7 +138,7 @@ public partial class HistoryPageViewModel : ObservableObject
 
         GroupFilterOptions.Clear();
         GroupFilterOptions.Add("全部小组");
-        foreach (var groupName in _data.State.Groups
+        foreach (var groupName in _data.ActiveClassroom.Groups
             .Select(group => group.GroupName.Trim())
             .Where(name => name.Length > 0)
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -128,7 +156,7 @@ public partial class HistoryPageViewModel : ObservableObject
         }
 
         var options = CreateFilterOptions();
-        _filteredHistory = _historyExport.Filter(_allHistory, _data.State.Groups, options).ToList();
+        _filteredHistory = _historyExport.Filter(_allHistory, _data.ActiveClassroom.Groups, options).ToList();
         History.Clear();
         foreach (var entry in _filteredHistory)
         {
@@ -161,7 +189,7 @@ public partial class HistoryPageViewModel : ObservableObject
         NeverDrawnMembers.Clear();
         StaleMembers.Clear();
 
-        var memberNames = _data.State.Members
+        var memberNames = _data.ActiveClassroom.Members
             .Select(member => member.Name.Trim())
             .Where(name => name.Length > 0)
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -178,6 +206,16 @@ public partial class HistoryPageViewModel : ObservableObject
         OverviewStatistics.Add(new OverviewStatisticRowViewModel("总抽取人数", totalSelected.ToString(), "按成员次数统计"));
         OverviewStatistics.Add(new OverviewStatisticRowViewModel("已覆盖成员", coveredCount.ToString(), $"共 {memberNames.Count} 人"));
         OverviewStatistics.Add(new OverviewStatisticRowViewModel("未覆盖成员", Math.Max(0, memberNames.Count - coveredCount).ToString(), "尚未出现在历史中"));
+
+        // 公平性指数：按当前筛选范围内、至少被点过一次的成员计算
+        var fairness = FairnessService.ComputeFairnessIndex(memberNames
+            .Where(name => drawCounts.ContainsKey(name))
+            .Select(name => drawCounts[name])
+            .ToList());
+        FairnessIndex = fairness;
+        FairnessIndexText = fairness.ToString("F0");
+        FairnessDescription = FairnessService.DescribeFairnessIndex(fairness);
+        OverviewStatistics.Add(new OverviewStatisticRowViewModel("公平性指数", FairnessIndexText, FairnessDescription));
 
         foreach (var row in memberNames
             .Select(name => new MemberStatisticRowViewModel(
@@ -215,7 +253,7 @@ public partial class HistoryPageViewModel : ObservableObject
             StaleMembers.Add(new MemberRecencyStatisticRowViewModel(name, last.LocalDateTime.ToString("yyyy-MM-dd"), Math.Max(1, (int)(DateTimeOffset.Now - last).TotalDays)));
         }
 
-        foreach (var group in _data.State.Groups.Where(group => !string.IsNullOrWhiteSpace(group.GroupName)))
+        foreach (var group in _data.ActiveClassroom.Groups.Where(group => !string.IsNullOrWhiteSpace(group.GroupName)))
         {
             var memberSet = group.Members
                 .Select(name => name.Trim())
@@ -295,7 +333,7 @@ public partial class HistoryPageViewModel : ObservableObject
             return;
         }
 
-        _data.State.DrawHistory.Clear();
+        _data.ActiveClassroom.DrawHistory.Clear();
         Reload();
         await _data.SaveAsync();
         StatusSeverity = InfoBarSeverity.Success;
@@ -315,7 +353,7 @@ public partial class HistoryPageViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(HasFilteredHistory))]
     private async Task ExportCsvAsync()
     {
-        await _files.SaveTextAsync("PickWeight-历史", ".csv", _historyExport.ExportCsv(_filteredHistory, _data.State.Groups));
+        await _files.SaveTextAsync("PickWeight-历史", ".csv", _historyExport.ExportCsv(_filteredHistory, _data.ActiveClassroom.Groups));
         StatusSeverity = InfoBarSeverity.Success;
         StatusMessage = $"已导出 {_filteredHistory.Count} 条历史记录。";
     }
@@ -323,7 +361,7 @@ public partial class HistoryPageViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(HasFilteredHistory))]
     private async Task ExportJsonAsync()
     {
-        await _files.SaveTextAsync("PickWeight-历史", ".json", _historyExport.ExportJson(_filteredHistory, _data.State.Groups, CreateFilterOptions(), DateTimeOffset.Now));
+        await _files.SaveTextAsync("PickWeight-历史", ".json", _historyExport.ExportJson(_filteredHistory, _data.ActiveClassroom.Groups, CreateFilterOptions(), DateTimeOffset.Now));
         StatusSeverity = InfoBarSeverity.Success;
         StatusMessage = $"已导出 {_filteredHistory.Count} 条历史记录。";
     }
@@ -364,3 +402,4 @@ public sealed record MemberRecencyStatisticRowViewModel(string Name, string Last
 {
     public string Detail => $"上次被点：{LastDrawnAt}，已间隔 {DaysSinceLastDraw} 天";
 }
+

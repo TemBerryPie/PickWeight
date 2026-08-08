@@ -38,7 +38,10 @@ public partial class MembersPageViewModel : ObservableObject, IEditablePageViewM
     [ObservableProperty] private InfoBarSeverity statusSeverity = InfoBarSeverity.Success;
     [ObservableProperty] private MemberRowViewModel? selectedMember;
     [ObservableProperty] private string searchText = string.Empty;
+    [ObservableProperty] private int sortOptionIndex;
 
+    /// <summary>排序选项：0 姓名，1 学号，2 座位，3 被点次数，4 权重，5 最近被点。</summary>
+    public static IReadOnlyList<string> SortOptions { get; } = ["姓名", "学号", "座位", "被点次数", "权重", "最近被点"];
     public bool HasStatus => !string.IsNullOrWhiteSpace(StatusMessage);
     public bool HasMembers => Members.Count > 0;
     public bool HasFilteredMembers => FilteredMembers.Count > 0;
@@ -65,12 +68,13 @@ public partial class MembersPageViewModel : ObservableObject, IEditablePageViewM
 
     partial void OnStatusMessageChanged(string value) => OnPropertyChanged(nameof(HasStatus));
     partial void OnSearchTextChanged(string value) => ApplyFilter();
+    partial void OnSortOptionIndexChanged(int value) => ApplyFilter();
 
     public void Reload()
     {
         _hasLoaded = false;
         Members.Clear();
-        foreach (var member in _data.State.Members)
+        foreach (var member in _data.ActiveClassroom.Members)
         {
             Members.Add(CreateRow(member.Clone()));
         }
@@ -93,7 +97,7 @@ public partial class MembersPageViewModel : ObservableObject, IEditablePageViewM
         Members.Clear();
         FilteredMembers.Clear();
 
-        var source = _data.State.Members.Select(member => member.Clone()).ToList();
+        var source = _data.ActiveClassroom.Members.Select(member => member.Clone()).ToList();
         for (var index = 0; index < source.Count; index++)
         {
             Members.Add(CreateRow(source[index]));
@@ -112,12 +116,34 @@ public partial class MembersPageViewModel : ObservableObject, IEditablePageViewM
         _isLoading = false;
     }
 
-    public bool TryValidateMemberName(MemberRowViewModel? editingMember, string? proposedName, out string error)
+    public bool ValidateStudentId(string? studentId, out string error)
+    {
+        var value = studentId?.Trim() ?? string.Empty;
+        if (value.Length > 50)
+        {
+            error = "学号不能超过 50 个字符。";
+            return false;
+        }
+
+        error = string.Empty;
+        return true;
+    }
+
+    public bool TryValidateMemberName(
+        MemberRowViewModel? editingMember,
+        string? proposedName,
+        out string error,
+        string? proposedStudentId = null)
     {
         var name = proposedName?.Trim() ?? string.Empty;
         if (name.Length == 0)
         {
             error = "成员姓名不能为空。";
+            return false;
+        }
+
+        if (!ValidateStudentId(proposedStudentId, out error))
+        {
             return false;
         }
 
@@ -136,9 +162,12 @@ public partial class MembersPageViewModel : ObservableObject, IEditablePageViewM
         string name,
         MemberGender? gender,
         double explicitWeight,
-        int calledCount)
+        int calledCount,
+        string? studentId = null,
+        string? note = null,
+        bool isAbsentToday = false)
     {
-        if (!TryValidateMemberName(null, name, out var error))
+        if (!TryValidateMemberName(null, name, out var error, studentId))
         {
             StatusSeverity = InfoBarSeverity.Error;
             StatusMessage = error;
@@ -147,6 +176,9 @@ public partial class MembersPageViewModel : ObservableObject, IEditablePageViewM
 
         var model = new Member();
         model.Name = name.Trim();
+        model.StudentId = NormalizeOptionalText(studentId);
+        model.Note = NormalizeOptionalText(note);
+        model.AbsentOn = isAbsentToday ? DateOnly.FromDateTime(DateTime.Today) : null;
         model.Gender = gender;
         MemberRules.ChangeCalledCount(model, Math.Max(0, calledCount));
         MemberRules.SetExplicitWeight(model, NormalizeWeight(explicitWeight));
@@ -172,9 +204,12 @@ public partial class MembersPageViewModel : ObservableObject, IEditablePageViewM
         string name,
         MemberGender? gender,
         double explicitWeight,
-        int calledCount)
+        int calledCount,
+        string? studentId = null,
+        string? note = null,
+        bool isAbsentToday = false)
     {
-        if (!TryValidateMemberName(member, name, out var error))
+        if (!TryValidateMemberName(member, name, out var error, studentId))
         {
             StatusSeverity = InfoBarSeverity.Error;
             StatusMessage = error;
@@ -185,7 +220,7 @@ public partial class MembersPageViewModel : ObservableObject, IEditablePageViewM
         _suppressAutoSave = true;
         try
         {
-            member.ApplyEdit(name, gender, explicitWeight, calledCount);
+            member.ApplyEdit(name, gender, explicitWeight, calledCount, studentId, note, isAbsentToday);
             ApplyFilter();
             IsDirty = true;
         }
@@ -354,9 +389,48 @@ public partial class MembersPageViewModel : ObservableObject, IEditablePageViewM
         }
     }
 
-    [RelayCommand]
-    private async Task ImportExcelAsync()
+    /// <summary>粘贴导入前预览：先剥离行首编号并归一化，再复用导入服务的预览逻辑。</summary>
+    public MemberImportPreview PreviewImport(string pastedText) =>
+        _importExport.PreviewImport(
+            FairnessService.NormalizePastedLines(pastedText),
+            Members.Select(member => member.ToModel()));
+
+    /// <summary>粘贴导入：归一化文本后按导入流程新增成员并保存。</summary>
+    public async Task PasteImportAsync(string pastedText)
     {
+        var normalized = FairnessService.NormalizePastedLines(pastedText);
+        var models = Members.Select(member => member.ToModel()).ToList();
+        var preview = _importExport.PreviewImport(normalized, models);
+        if (preview.AddCount == 0)
+        {
+            StatusSeverity = InfoBarSeverity.Informational;
+            StatusMessage = $"没有可导入的新成员，跳过 {preview.SkipCount} 行。";
+            return;
+        }
+
+        var result = _importExport.ApplyImport(preview, models);
+        RecordUndoSnapshot();
+        _suppressAutoSave = true;
+        try
+        {
+            ReplaceRows(models);
+            IsDirty = true;
+        }
+        finally
+        {
+            _suppressAutoSave = false;
+        }
+
+        var saved = await SaveMembersAsync($"已新增 {result.AddedCount} 名成员并保存。");
+        if (saved && preview.HasErrors)
+        {
+            StatusSeverity = InfoBarSeverity.Warning;
+            StatusMessage = $"已新增 {result.AddedCount} 名成员；跳过 {result.SkippedCount} 行。";
+        }
+    }
+
+    [RelayCommand]
+    private async Task ImportExcelAsync()    {
         var path = await _files.OpenPathAsync(".xlsx");
         if (path is null) return;
         try
@@ -485,7 +559,18 @@ public partial class MembersPageViewModel : ObservableObject, IEditablePageViewM
         }
     }
 
-    private MemberRowViewModel CreateRow(Member member) => new(member, OnRowChanged);
+    private MemberRowViewModel CreateRow(Member member)
+    {
+        var row = new MemberRowViewModel(member, OnRowChanged);
+        var seat = SeatMapService.FindSeat(_data.ActiveClassroom.SeatMap ?? new SeatMap(), member.Name);
+        row.UpdateSeat(seat);
+        var lastDrawn = _data.ActiveClassroom.DrawHistory
+            .Where(entry => entry.MemberNames.Contains(member.Name, StringComparer.OrdinalIgnoreCase))
+            .OrderByDescending(entry => entry.DrawnAt)
+            .FirstOrDefault()?.DrawnAt;
+        row.UpdateLastDrawnAt(lastDrawn);
+        return row;
+    }
 
     private void ReplaceRows(IEnumerable<Member> models)
     {
@@ -500,11 +585,11 @@ public partial class MembersPageViewModel : ObservableObject, IEditablePageViewM
 
     private void ApplyFilter()
     {
+        RefreshHeatBars();
         var query = SearchText.Trim();
         FilteredMembers.Clear();
-        foreach (var member in Members
-            .Where(member => query.Length == 0 || member.Name.Contains(query, StringComparison.OrdinalIgnoreCase))
-            .OrderBy(member => member.Name, StringComparer.OrdinalIgnoreCase))
+        foreach (var member in SortMembers(
+            Members.Where(member => query.Length == 0 || member.Name.Contains(query, StringComparison.OrdinalIgnoreCase))))
         {
             FilteredMembers.Add(member);
         }
@@ -514,10 +599,10 @@ public partial class MembersPageViewModel : ObservableObject, IEditablePageViewM
 
     private async Task ApplyFilterAsync()
     {
+        RefreshHeatBars();
         var query = SearchText.Trim();
-        var filtered = Members
-            .Where(member => query.Length == 0 || member.Name.Contains(query, StringComparison.OrdinalIgnoreCase))
-            .OrderBy(member => member.Name, StringComparer.OrdinalIgnoreCase)
+        var filtered = SortMembers(
+            Members.Where(member => query.Length == 0 || member.Name.Contains(query, StringComparison.OrdinalIgnoreCase)))
             .ToList();
 
         FilteredMembers.Clear();
@@ -531,6 +616,43 @@ public partial class MembersPageViewModel : ObservableObject, IEditablePageViewM
         }
 
         NotifyCollectionStateChanged();
+    }
+
+    private void RefreshHeatBars()
+    {
+        var maxCalledCount = Members.Count == 0 ? 0 : Members.Max(member => member.CalledCount);
+        foreach (var member in Members)
+        {
+            member.UpdateHeatBar(maxCalledCount);
+        }
+    }
+
+        /// <summary>按当前排序选项排序；学号/座位/最近被点为空的成员始终排到最后。</summary>
+    private IEnumerable<MemberRowViewModel> SortMembers(IEnumerable<MemberRowViewModel> members)
+    {
+        return SortOptionIndex switch
+        {
+            1 => members
+                .OrderByDescending(member => string.IsNullOrWhiteSpace(member.StudentId))
+                .ThenBy(member => member.StudentId?.Trim(), StringComparer.OrdinalIgnoreCase)
+                .ThenBy(member => member.Name, StringComparer.OrdinalIgnoreCase),
+            2 => members
+                .OrderByDescending(member => !member.IsSeated)
+                .ThenBy(member => member.SeatTuple.Column)
+                .ThenBy(member => member.SeatTuple.Row)
+                .ThenBy(member => member.Name, StringComparer.OrdinalIgnoreCase),
+            3 => members
+                .OrderByDescending(member => member.CalledCount)
+                .ThenBy(member => member.Name, StringComparer.OrdinalIgnoreCase),
+            4 => members
+                .OrderBy(member => member.Weight)
+                .ThenBy(member => member.Name, StringComparer.OrdinalIgnoreCase),
+            5 => members
+                .OrderByDescending(member => !member.LastDrawnAt.HasValue)
+                .ThenByDescending(member => member.LastDrawnAt)
+                .ThenBy(member => member.Name, StringComparer.OrdinalIgnoreCase),
+            _ => members.OrderBy(member => member.Name, StringComparer.OrdinalIgnoreCase)
+        };
     }
 
     private static object CreateImportPreviewContent(MemberImportPreview preview)
@@ -599,4 +721,12 @@ public partial class MembersPageViewModel : ObservableObject, IEditablePageViewM
         double.IsFinite(value) ? value : 0d,
         0d,
         MemberRules.MaximumWeight);
+
+    private static string? NormalizeOptionalText(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }
+
+
+
+
+

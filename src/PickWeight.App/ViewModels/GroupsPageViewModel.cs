@@ -20,6 +20,12 @@ public partial class GroupsPageViewModel : ObservableObject, IEditablePageViewMo
     public ObservableCollection<string> AllMembers { get; } = [];
     public ObservableCollection<string> FilteredAvailableMembers { get; } = [];
 
+    /// <summary>弹窗中已勾选的待加入成员；搜索过滤不丢失，以忽略大小写的方式去重。</summary>
+    public HashSet<string> SelectedAvailableMembers { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>可加入成员列表重填完成后触发，页面据此恢复 ListView 的勾选状态。</summary>
+    public event Action? AvailableMembersRefreshed;
+
     [ObservableProperty] private GroupEditorViewModel? selectedGroup;
     [ObservableProperty] private bool isDirty;
     [ObservableProperty] private string statusMessage = string.Empty;
@@ -34,10 +40,6 @@ public partial class GroupsPageViewModel : ObservableObject, IEditablePageViewMo
     public bool HasGroupMembers => SelectedGroup?.Members.Count > 0;
     public Visibility GroupEditorVisibility => HasSelectedGroup ? Visibility.Visible : Visibility.Collapsed;
     public Visibility NoGroupsVisibility => HasGroups ? Visibility.Collapsed : Visibility.Visible;
-    public Visibility AvailableMemberSearchHintVisibility => HasAvailableMemberSearchQuery ? Visibility.Collapsed : Visibility.Visible;
-    public Visibility NoAvailableMembersVisibility => HasAvailableMemberSearchQuery && !HasAvailableMembers
-        ? Visibility.Visible
-        : Visibility.Collapsed;
     public Visibility NoGroupMembersVisibility => HasGroupMembers ? Visibility.Collapsed : Visibility.Visible;
 
     public GroupsPageViewModel(
@@ -65,7 +67,7 @@ public partial class GroupsPageViewModel : ObservableObject, IEditablePageViewMo
     {
         Groups.Clear();
         AllMembers.Clear();
-        foreach (var member in _data.State.Members
+        foreach (var member in _data.ActiveClassroom.Members
             .Select(member => member.Name.Trim())
             .Where(name => name.Length > 0)
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -74,7 +76,7 @@ public partial class GroupsPageViewModel : ObservableObject, IEditablePageViewMo
             AllMembers.Add(member);
         }
 
-        foreach (var group in _data.State.Groups)
+        foreach (var group in _data.ActiveClassroom.Groups)
         {
             Groups.Add(new GroupEditorViewModel(group.Clone(), MarkDirty));
         }
@@ -89,7 +91,7 @@ public partial class GroupsPageViewModel : ObservableObject, IEditablePageViewMo
     public async Task SaveAsync()
     {
         var rawModels = Groups.Select(group => group.ToModel(clampMultiplier: false)).ToList();
-        var validation = GroupRules.ValidateGroups(rawModels, _data.State.Members);
+        var validation = GroupRules.ValidateGroups(rawModels, _data.ActiveClassroom.Members);
         if (!validation.IsValid)
         {
             StatusSeverity = InfoBarSeverity.Error;
@@ -140,7 +142,7 @@ public partial class GroupsPageViewModel : ObservableObject, IEditablePageViewMo
 
     public void ResetAvailableMemberSearch() => AvailableMemberSearchText = string.Empty;
 
-    public void AddMembers(IEnumerable<object> selectedItems)
+    public void AddMembers(IEnumerable<string>? selectedMembers = null)
     {
         if (SelectedGroup is null)
         {
@@ -149,8 +151,8 @@ public partial class GroupsPageViewModel : ObservableObject, IEditablePageViewMo
             return;
         }
 
-        var selected = selectedItems
-            .OfType<string>()
+        var selected = (selectedMembers ?? SelectedAvailableMembers)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
         var added = 0;
@@ -211,7 +213,7 @@ public partial class GroupsPageViewModel : ObservableObject, IEditablePageViewMo
         ImportResult result;
         try
         {
-            result = _importExport.Import(content, models, _data.State.Members);
+            result = _importExport.Import(content, models, _data.ActiveClassroom.Members);
         }
         catch (InvalidDataException ex)
         {
@@ -253,31 +255,28 @@ public partial class GroupsPageViewModel : ObservableObject, IEditablePageViewMo
         if (SelectedGroup is null)
         {
             NotifyAvailableMemberSearchState();
+            AvailableMembersRefreshed?.Invoke();
             return;
         }
 
         var query = AvailableMemberSearchText.Trim();
-        if (query.Length > 0)
+        var groupMembers = SelectedGroup.Members.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var member in AllMembers
+            .Where(name => !groupMembers.Contains(name))
+            .Where(name => query.Length == 0 || name.Contains(query, StringComparison.OrdinalIgnoreCase))
+            .Order(StringComparer.OrdinalIgnoreCase))
         {
-            var groupMembers = SelectedGroup.Members.ToHashSet(StringComparer.OrdinalIgnoreCase);
-            foreach (var member in AllMembers
-                .Where(name => !groupMembers.Contains(name))
-                .Where(name => name.Contains(query, StringComparison.OrdinalIgnoreCase))
-                .Order(StringComparer.OrdinalIgnoreCase))
-            {
-                FilteredAvailableMembers.Add(member);
-            }
+            FilteredAvailableMembers.Add(member);
         }
 
         NotifyAvailableMemberSearchState();
+        AvailableMembersRefreshed?.Invoke();
     }
 
     private void NotifyAvailableMemberSearchState()
     {
         OnPropertyChanged(nameof(HasAvailableMembers));
         OnPropertyChanged(nameof(HasAvailableMemberSearchQuery));
-        OnPropertyChanged(nameof(AvailableMemberSearchHintVisibility));
-        OnPropertyChanged(nameof(NoAvailableMembersVisibility));
     }
 
     private void NotifyCollectionStateChanged()

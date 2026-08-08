@@ -1,6 +1,8 @@
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Markup;
 using PickWeight.Core.Models;
 using PickWeight_App.Services;
 using System.Diagnostics;
@@ -11,18 +13,16 @@ using Windows.System;
 namespace PickWeight_App;
 
 /// <summary>
-/// A compact, transient window used by the floating quick-draw button.  It has
-/// no knowledge of draw rules; callers provide the candidates, chosen name and
-/// the callbacks that persist or discard the prepared draw.
+/// 快速抽取结果窗口。支持单人与多人展示，所有抽取规则由调用方提供。
 /// </summary>
 public sealed partial class QuickDrawResultWindow : Window
 {
     private const int CompactLogicalWidth = 440;
     private const int CompactLogicalHeight = 196;
-    private const int PresentationLogicalWidth = 1280;
-    private const int PresentationLogicalHeight = 720;
-    private const int AnimationDurationMilliseconds = 1500;
-    private const int AnimationIntervalMilliseconds = 75;
+    private const int AnimationDurationMilliseconds = 2500;
+    private const int AnimationIntervalMinMilliseconds = 45;
+    private const int AnimationIntervalMaxMilliseconds = 220;
+    private const int RevealIntervalMilliseconds = 420;
     private const int GwlStyle = -16;
     private const int GwlExStyle = -20;
     private const int DwmwaWindowCornerPreference = 33;
@@ -39,40 +39,37 @@ public sealed partial class QuickDrawResultWindow : Window
     private const uint SwpNoSize = 0x0001;
     private const uint SwpNoZOrder = 0x0004;
     private const uint SwpFrameChanged = 0x0020;
-    private const int WhMouseLl = 14;
-    private const int WmLButtonDown = 0x0201;
-    private const int WmRButtonDown = 0x0204;
-    private const int WmMButtonDown = 0x0207;
-    private const int WmXButtonDown = 0x020B;
 
     private readonly nint _windowHandle;
-    private readonly bool _isPresentationMode;
     private readonly TransientAcrylicBackdrop _acrylicBackdrop;
     private readonly DispatcherTimer _animationTimer;
     private readonly Stopwatch _animationStopwatch = new();
     private readonly Random _random = new();
     private TaskCompletionSource? _closedCompletion;
     private IReadOnlyList<string> _candidateNames = [];
-    private string _finalName = string.Empty;
+    private IReadOnlyList<string> _rollingNames = [];
+    private IReadOnlyList<string> _finalNames = [];
     private Func<CancellationToken, Task>? _commitAsync;
     private Func<CancellationToken, Task>? _cancelAsync;
     private CancellationToken _cancellationToken;
     private CancellationTokenRegistration _cancellationRegistration;
-    private readonly LowLevelMouseProc _mouseHookProc;
-    private nint _mouseHook;
     private bool _isShown;
     private bool _animationCompleted;
     private bool _isCompletingAnimation;
+    private bool _skipAnimation;
     private bool _isClosed;
     private bool _cancelInvoked;
+    private int _revealIndex;
+    private bool _hasPendingNameTransition;
 
-    public QuickDrawResultWindow(bool isPresentationMode = false)
+    internal bool IsAnimationCompleted => _animationCompleted;
+    internal bool HasCancelCallback => _cancelAsync is not null;
+
+    public QuickDrawResultWindow()
     {
         InitializeComponent();
 
-        _isPresentationMode = isPresentationMode;
-        Title = isPresentationMode ? "投影抽取" : "快速抽取";
-        _mouseHookProc = MouseHookCallback;
+        Title = "快速抽取";
         _acrylicBackdrop = new TransientAcrylicBackdrop(this);
         AppWindow.SetIcon(App.IconPath);
         _windowHandle = WinRT.Interop.WindowNative.GetWindowHandle(this);
@@ -88,7 +85,7 @@ public sealed partial class QuickDrawResultWindow : Window
         ConfigureNativeWindow(_windowHandle);
         Activated += QuickDrawResultWindow_Activated;
         Closed += QuickDrawResultWindow_Closed;
-        _animationTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(AnimationIntervalMilliseconds) };
+        _animationTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(AnimationIntervalMinMilliseconds) };
         _animationTimer.Tick += AnimationTimer_Tick;
     }
 
@@ -109,46 +106,124 @@ public sealed partial class QuickDrawResultWindow : Window
     /// </summary>
     public async Task ShowAsync(
         IReadOnlyList<string> candidateNames,
-        string finalName,
+        IReadOnlyList<string> rollingNames,
+        IReadOnlyList<string> finalNames,
         Func<CancellationToken, Task> commitAsync,
         Func<CancellationToken, Task> cancelAsync,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(candidateNames);
-        ArgumentException.ThrowIfNullOrWhiteSpace(finalName);
+        ArgumentNullException.ThrowIfNull(rollingNames);
+        ArgumentNullException.ThrowIfNull(finalNames);
         ArgumentNullException.ThrowIfNull(commitAsync);
         ArgumentNullException.ThrowIfNull(cancelAsync);
+
+        if (finalNames.Count == 0)
+        {
+            throw new ArgumentException("至少需要一个结果姓名。", nameof(finalNames));
+        }
 
         if (_closedCompletion is not null)
         {
             throw new InvalidOperationException("此快速抽取窗口已显示。");
         }
 
+        _rollingNames = rollingNames
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => name.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
         _candidateNames = candidateNames
             .Where(name => !string.IsNullOrWhiteSpace(name))
             .Select(name => name.Trim())
-            .Append(finalName.Trim())
+            .Concat(finalNames)
             .Distinct(StringComparer.Ordinal)
             .ToList();
-        _finalName = finalName.Trim();
+        _finalNames = finalNames.Select(name => name.Trim()).ToList();
         _commitAsync = commitAsync;
         _cancelAsync = cancelAsync;
         _cancellationToken = cancellationToken;
         _closedCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _cancellationRegistration = cancellationToken.Register(CloseFromCancellation);
 
-        NameText.FontSize = _isPresentationMode ? 128 : 44;
-        NameText.Text = NextCandidateName();
+        ConfigureMultiNameLayout();
+        _revealIndex = 0;
+        ShowNextName();
         ResizeAndCenter();
         _isShown = true;
         AppWindow.Show();
         Activate();
-        InstallOutsideClickHook();
         App.GetService<Services.AnimationService>().PlayPopupEntrance(WindowRoot);
         _animationStopwatch.Restart();
         _animationTimer.Start();
 
         await _closedCompletion.Task;
+    }
+
+    private DataTemplate? _multiNameTemplate;
+    private double _multiNameFontSize;
+
+    /// <summary>按人数切换单人大字 / 多人网格布局。</summary>
+    private void ConfigureMultiNameLayout()
+    {
+        var isMulti = _finalNames.Count > 1;
+        NameText.Visibility = isMulti ? Visibility.Collapsed : Visibility.Visible;
+        NamesList.Visibility = isMulti ? Visibility.Visible : Visibility.Collapsed;
+
+        if (!isMulti)
+        {
+            NameText.FontSize = 44;
+            return;
+        }
+
+        // 多人布局：字号随人数缩小
+        var baseFont = Math.Clamp(64d / Math.Sqrt(_finalNames.Count), 24d, 44d);
+        if (_multiNameTemplate is null || Math.Abs(_multiNameFontSize - baseFont) > 0.01d)
+        {
+            _multiNameFontSize = baseFont;
+            _multiNameTemplate = CreateMultiNameTemplate(baseFont);
+        }
+
+        NamesList.ItemTemplate = _multiNameTemplate;
+    }
+
+    private DataTemplate CreateMultiNameTemplate(double fontSize)
+    {
+        var fontText = fontSize.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+        var xaml = string.Format(
+            System.Globalization.CultureInfo.InvariantCulture,
+            @"<DataTemplate xmlns=""http://schemas.microsoft.com/winfx/2006/xaml/presentation"">
+                <Border Margin=""8"" Padding=""20,12""
+                        Background=""{{ThemeResource CardBackgroundFillColorDefaultBrush}}""
+                        BorderBrush=""{{ThemeResource CardStrokeColorDefaultBrush}}""
+                        BorderThickness=""1"" CornerRadius=""12"">
+                    <TextBlock FontSize=""{0}""
+                               FontWeight=""SemiBold""
+                               Text=""{{Binding}}"" />
+                </Border>
+            </DataTemplate>",
+            fontText);
+        return (DataTemplate)XamlReader.Load(xaml);
+    }
+
+    private void ShowNextName()
+    {
+        if (_revealIndex >= _finalNames.Count)
+        {
+            return;
+        }
+
+        var name = _finalNames[_revealIndex];
+        if (_finalNames.Count == 1)
+        {
+            NameText.Text = name;
+        }
+        else
+        {
+            NamesList.ItemsSource = _finalNames.Take(_revealIndex + 1).ToList();
+        }
+
+        _revealIndex++;
     }
 
     private void WindowRoot_Loaded(object sender, RoutedEventArgs e) => ResizeAndCenter();
@@ -159,14 +234,45 @@ public sealed partial class QuickDrawResultWindow : Window
         {
             e.Handled = true;
             Close();
+            return;
         }
+
+        // 翻页笔操作：PageDown / PageRight / Space 跳过滚动动画直接定格
+        if (e.Key == VirtualKey.PageDown || e.Key == VirtualKey.Right || e.Key == VirtualKey.Space)
+        {
+            e.Handled = true;
+            SkipAnimation();
+        }
+    }
+
+    /// <summary>跳过滚动动画直接定格：置标志让下一个动画节拍立即进入完成分支。</summary>
+    private void SkipAnimation()
+    {
+        if (_isClosed || _isCompletingAnimation || _animationCompleted)
+        {
+            return;
+        }
+
+        _skipAnimation = true;
+        _animationStopwatch.Restart();
+        _animationTimer.Start();
     }
 
     private void QuickDrawResultWindow_Activated(object sender, WindowActivatedEventArgs args)
     {
-        if (_isShown && args.WindowActivationState == WindowActivationState.Deactivated && !_isClosed)
+        // 失焦自动关闭（加 800 ms 宽限期，避免弹出瞬间被抢焦点误关）
+        if (_isShown && !_isClosed
+            && args.WindowActivationState == WindowActivationState.Deactivated)
         {
-            Close();
+            var window = this;
+            App.DispatcherQueue.TryEnqueue(async () =>
+            {
+                await Task.Delay(800);
+                if (window._isShown && !window._isClosed)
+                {
+                    window.Close();
+                }
+            });
         }
     }
 
@@ -177,31 +283,64 @@ public sealed partial class QuickDrawResultWindow : Window
             return;
         }
 
-        if (_animationStopwatch.ElapsedMilliseconds < AnimationDurationMilliseconds)
+        if (!_skipAnimation && _animationStopwatch.ElapsedMilliseconds < AnimationDurationMilliseconds)
         {
-            NameText.Text = NextCandidateName();
+            // 滚动阶段：随机展示候选姓名
+            if (_finalNames.Count == 1)
+            {
+                NameText.Text = NextCandidateName();
+                if (_hasPendingNameTransition)
+                {
+                    App.GetService<Services.AnimationService>().PlayNameTick(NameText);
+                }
+
+                _hasPendingNameTransition = true;
+            }
+            else
+            {
+                // 多人：逐个揭晓
+                var elapsed = _animationStopwatch.ElapsedMilliseconds;
+                var revealCount = Math.Min(
+                    _finalNames.Count,
+                    1 + (int)(elapsed / RevealIntervalMilliseconds));
+                if (revealCount != _revealIndex)
+                {
+                    _revealIndex = revealCount;
+                    NamesList.ItemsSource = _finalNames.Take(revealCount).ToList();
+                }
+            }
+
+            ScheduleNextAnimationTick();
             return;
         }
 
         _isCompletingAnimation = true;
         _animationTimer.Stop();
         _animationCompleted = true;
-        NameText.Text = _finalName;
-        App.GetService<Services.AnimationService>().PlayResultReveal(NameText, 0);
+        _skipAnimation = false;
+
+        // 定格最终结果
+        if (_finalNames.Count == 1)
+        {
+            NameText.Text = _finalNames[0];
+            App.GetService<Services.AnimationService>().PlayResultReveal(NameText, 0);
+        }
+        else
+        {
+            NamesList.ItemsSource = _finalNames.ToList();
+            App.GetService<Services.AnimationService>().PlayResultReveal(NamesList, 0);
+        }
+
         try
         {
             await _commitAsync!(_cancellationToken);
         }
         catch (OperationCanceledException) when (_cancellationToken.IsCancellationRequested)
         {
-            // The cancel callback below restores the prepared draw when a caller
-            // cancels while the animation is completing.
             await InvokeCancelAsync();
         }
         catch
         {
-            // Restore the prepared draw if persistence fails.  This keeps a
-            // failed quick result from affecting a later draw in memory.
             await InvokeCancelAsync();
         }
         finally
@@ -210,11 +349,41 @@ public sealed partial class QuickDrawResultWindow : Window
         }
     }
 
+    /// <summary>按缓动曲线动态安排下一拍，实现「越转越慢」的减速停止效果。</summary>
+    private void ScheduleNextAnimationTick()
+    {
+        _animationTimer.Stop();
+        _animationTimer.Interval = TimeSpan.FromMilliseconds(
+            ComputeNextInterval(_animationStopwatch.ElapsedMilliseconds));
+        _animationTimer.Start();
+    }
+
+    /// <summary>
+    /// 计算下一拍滚动间隔（毫秒）。ease-out quadratic 缓动：进度越接近 1，间隔越接近上限，
+    /// 实现「越转越慢」的减速落地观感。抽为纯函数以便单元测试锁定滚动阶段换名次数。
+    /// </summary>
+    internal static int ComputeNextInterval(long elapsedMilliseconds)
+    {
+        var progress = Math.Clamp(
+            (double)elapsedMilliseconds / AnimationDurationMilliseconds,
+            0d,
+            1d);
+        var eased = 1d - Math.Pow(1d - progress, 2d);
+        return AnimationIntervalMinMilliseconds
+            + (int)((AnimationIntervalMaxMilliseconds - AnimationIntervalMinMilliseconds) * eased);
+    }
+
     private string NextCandidateName()
     {
+        // 滚动池优先：全班启用成员，让滚动观感更丰富；空则回退候选名，再回退最终名。
+        if (_rollingNames.Count > 0)
+        {
+            return _rollingNames[_random.Next(_rollingNames.Count)];
+        }
+
         if (_candidateNames.Count == 0)
         {
-            return _finalName;
+            return _finalNames[0];
         }
 
         return _candidateNames[_random.Next(_candidateNames.Count)];
@@ -224,8 +393,8 @@ public sealed partial class QuickDrawResultWindow : Window
     {
         var scale = WindowRoot.XamlRoot?.RasterizationScale
             ?? Math.Max(1d, GetDpiForWindow(_windowHandle) / 96d);
-        var logicalWidth = _isPresentationMode ? PresentationLogicalWidth : CompactLogicalWidth;
-        var logicalHeight = _isPresentationMode ? PresentationLogicalHeight : CompactLogicalHeight;
+        var logicalWidth = CompactLogicalWidth;
+        var logicalHeight = CompactLogicalHeight;
         var size = new SizeInt32(
             (int)Math.Ceiling(logicalWidth * scale),
             (int)Math.Ceiling(logicalHeight * scale));
@@ -264,7 +433,6 @@ public sealed partial class QuickDrawResultWindow : Window
 
         _isClosed = true;
         _isShown = false;
-        RemoveOutsideClickHook();
         _animationTimer.Stop();
         _animationStopwatch.Reset();
         _cancellationRegistration.Dispose();
@@ -286,9 +454,6 @@ public sealed partial class QuickDrawResultWindow : Window
         _cancelInvoked = true;
         try
         {
-            // Discard must still persist when the caller cancelled the request;
-            // passing an already-cancelled token could leave a prepared draw in
-            // memory without restoring its snapshot.
             var cancellationToken = _cancellationToken.IsCancellationRequested
                 ? CancellationToken.None
                 : _cancellationToken;
@@ -321,53 +486,6 @@ public sealed partial class QuickDrawResultWindow : Window
         SetWindowPos(windowHandle, 0, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpNoZOrder | SwpFrameChanged);
     }
 
-    private void InstallOutsideClickHook()
-    {
-        if (_mouseHook != 0)
-        {
-            return;
-        }
-
-        _mouseHook = SetWindowsHookEx(WhMouseLl, _mouseHookProc, GetModuleHandle(null), 0);
-    }
-
-    private void RemoveOutsideClickHook()
-    {
-        if (_mouseHook == 0)
-        {
-            return;
-        }
-
-        UnhookWindowsHookEx(_mouseHook);
-        _mouseHook = 0;
-    }
-
-    private nint MouseHookCallback(int code, nint message, nint data)
-    {
-        if (code >= 0
-            && message.ToInt32() is WmLButtonDown or WmRButtonDown or WmMButtonDown or WmXButtonDown
-            && !_isClosed)
-        {
-            var mouse = Marshal.PtrToStructure<LowLevelMouseHookData>(data);
-            if (GetWindowRect(_windowHandle, out var bounds)
-                && (mouse.Point.X < bounds.Left
-                    || mouse.Point.X >= bounds.Right
-                    || mouse.Point.Y < bounds.Top
-                    || mouse.Point.Y >= bounds.Bottom))
-            {
-                App.DispatcherQueue.TryEnqueue(() =>
-                {
-                    if (!_isClosed)
-                    {
-                        Close();
-                    }
-                });
-            }
-        }
-
-        return CallNextHookEx(_mouseHook, code, message, data);
-    }
-
     [StructLayout(LayoutKind.Sequential)]
     private struct NativePoint
     {
@@ -383,18 +501,6 @@ public sealed partial class QuickDrawResultWindow : Window
         public int Right;
         public int Bottom;
     }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct LowLevelMouseHookData
-    {
-        public NativePoint Point;
-        public uint MouseData;
-        public uint Flags;
-        public uint Time;
-        public nuint ExtraInfo;
-    }
-
-    private delegate nint LowLevelMouseProc(int code, nint message, nint data);
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
     private static extern nint GetWindowLongPtr(nint windowHandle, int index);
@@ -419,20 +525,6 @@ public sealed partial class QuickDrawResultWindow : Window
 
     [DllImport("user32.dll")]
     private static extern uint GetDpiForWindow(nint windowHandle);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern nint SetWindowsHookEx(
-        int hookId,
-        LowLevelMouseProc callback,
-        nint moduleHandle,
-        uint threadId);
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool UnhookWindowsHookEx(nint hookHandle);
-
-    [DllImport("user32.dll")]
-    private static extern nint CallNextHookEx(nint hookHandle, int code, nint message, nint data);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

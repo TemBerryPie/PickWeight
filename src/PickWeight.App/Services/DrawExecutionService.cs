@@ -18,6 +18,7 @@ public interface IDrawExecutionService
         IEnumerable<Member>? members = null,
         bool confirmSelection = false,
         bool notify = true,
+        bool allowOutsideSelection = false,
         CancellationToken cancellationToken = default);
 
     Task RebuildCommittedStateAsync(
@@ -26,7 +27,33 @@ public interface IDrawExecutionService
         CancellationToken cancellationToken = default);
 
     Task DiscardAsync(PreparedDraw prepared, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 把已确认的成员替换为重新抽取的一名新成员（课堂「换一个」）。
+    /// 会回滚原成员的被点次数与本轮已抽标记，再按相同规则抽取新成员。
+    /// </summary>
+    Task<DrawReplaceOutcome> ReplaceAsync(
+        PreparedDraw prepared,
+        Member replacedMember,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 为某位成员的抽取记录写入课堂表现评价。若设置开启评价影响权重，
+    /// 会同步调整该成员当前的显式权重并标记 <see cref="Member.IsWeightAdjustedByRating"/>。
+    /// 返回是否成功写入（成员在抽取历史中没有记录时返回 false）。
+    /// </summary>
+    Task<bool> RateAsync(
+        PreparedDraw prepared,
+        string memberName,
+        DrawRating rating,
+        CancellationToken cancellationToken = default);
 }
+
+public sealed record DrawReplaceOutcome(
+    bool Succeeded,
+    Member? Replacement,
+    IReadOnlyList<string> CandidateNames,
+    string? Message);
 
 public sealed record DrawExecutionRequest(
     int TargetCount,
@@ -43,7 +70,9 @@ public sealed class PreparedDraw
         IReadOnlyList<string> candidateNames,
         IReadOnlyDictionary<string, DrawExecutionService.MemberSnapshot> snapshots,
         int drawsSinceLastAutoReset,
-        bool autoCommitSelection)
+        bool autoCommitSelection,
+        int roundNumber,
+        IReadOnlyList<string> roundDrawnNames)
     {
         DrawMode = drawMode;
         Filters = filters;
@@ -52,6 +81,8 @@ public sealed class PreparedDraw
         Snapshots = snapshots;
         DrawsSinceLastAutoReset = drawsSinceLastAutoReset;
         AutoCommitSelection = autoCommitSelection;
+        RoundNumber = roundNumber;
+        RoundDrawnNames = roundDrawnNames;
     }
 
     public DrawMode DrawMode { get; }
@@ -60,6 +91,10 @@ public sealed class PreparedDraw
     public IReadOnlyList<Member> SelectedMembers => Result.SelectedMembers;
     public IReadOnlyList<string> CandidateNames { get; }
     public bool HasCandidates => CandidateNames.Count > 0;
+    public int RoundNumber { get; }
+
+    /// <summary>Prepare 时刻的本轮已抽名单快照，用于回滚。</summary>
+    internal IReadOnlyList<string> RoundDrawnNames { get; }
 
     internal IReadOnlyDictionary<string, DrawExecutionService.MemberSnapshot> Snapshots { get; }
     internal int DrawsSinceLastAutoReset { get; }
@@ -111,29 +146,82 @@ public sealed class DrawExecutionService : IDrawExecutionService
         await _data.ReloadImplicitWeightsAsync(cancellationToken);
 
         var mode = request.Mode ?? _settings.Current.DrawMode;
+        var classroom = _data.ActiveClassroom;
+        var filters = AugmentFilters(classroom, request.Filters, _settings.Current.DrawNoRepeatInRound);
         var filteredMembers = DrawFilterService.Apply(
-            _data.State.Members,
-            _data.State.Groups,
-            _data.State.DrawHistory,
-            request.Filters);
+            classroom.Members,
+            classroom.Groups,
+            classroom.DrawHistory,
+            filters,
+            classroom.SeatMap);
         var preview = _drawService.PreviewProbabilities(
             filteredMembers,
-            _data.State.Groups,
+            classroom.Groups,
             new DrawOptions(mode));
         var result = _drawService.Draw(
             filteredMembers,
-            _data.State.Groups,
+            classroom.Groups,
             Math.Max(1, request.TargetCount),
             new DrawOptions(mode));
 
+        // 若本轮已无可抽候选但仍有成员可抽，自动翻轮
+        if (_settings.Current.DrawNoRepeatInRound
+            && result.SelectedMembers.Count == 0
+            && classroom.Round.DrawnNames.Count > 0
+            && DrawFilterService.Apply(
+                classroom.Members,
+                classroom.Groups,
+                classroom.DrawHistory,
+                filters with { ExcludeRoundDrawnNames = null },
+                classroom.SeatMap).Count > 0)
+        {
+            classroom.Round.StartNextRound();
+            filters = AugmentFilters(classroom, request.Filters, _settings.Current.DrawNoRepeatInRound);
+            filteredMembers = DrawFilterService.Apply(
+                classroom.Members,
+                classroom.Groups,
+                classroom.DrawHistory,
+                filters,
+                classroom.SeatMap);
+            preview = _drawService.PreviewProbabilities(
+                filteredMembers,
+                classroom.Groups,
+                new DrawOptions(mode));
+            result = _drawService.Draw(
+                filteredMembers,
+                classroom.Groups,
+                Math.Max(1, request.TargetCount),
+                new DrawOptions(mode));
+        }
+
         return new PreparedDraw(
             mode,
-            request.Filters,
+            filters,
             result,
             preview.Select(item => item.Name).ToList(),
-            CaptureSnapshots(_data.State.Members),
+            CaptureSnapshots(classroom.Members),
             _data.State.Settings.DrawsSinceLastAutoReset,
-            request.AutoCommitSelection);
+            request.AutoCommitSelection,
+            classroom.Round.RoundNumber,
+            classroom.Round.DrawnNames.ToList());
+    }
+
+    /// <summary>
+    /// 根据设置给过滤条件补充轮转排除与今日请假排除。
+    /// 轮转排除仅在「一轮不重复」开启时注入本轮已抽名单，关闭时注入空集（与 null 语义等价）；
+    /// 无论请求方传了什么过滤条件，请假成员始终不参与抽取。
+    /// </summary>
+    private static DrawFilterOptions AugmentFilters(Classroom classroom, DrawFilterOptions request, bool noRepeatInRound)
+    {
+        var roundNames = noRepeatInRound
+            ? classroom.Round.DrawnNamesSet()
+            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var absentNames = DrawFilterService.GetAbsentNames(classroom.Members);
+        return request with
+        {
+            ExcludeRoundDrawnNames = roundNames,
+            ExcludeAbsentNames = absentNames
+        };
     }
 
     public async Task<DrawCommitOutcome> CommitAsync(
@@ -141,10 +229,11 @@ public sealed class DrawExecutionService : IDrawExecutionService
         IEnumerable<Member>? members = null,
         bool confirmSelection = false,
         bool notify = true,
+        bool allowOutsideSelection = false,
         CancellationToken cancellationToken = default)
     {
         var selected = (members ?? prepared.SelectedMembers)
-            .Where(member => prepared.SelectedMembers.Contains(member))
+            .Where(member => allowOutsideSelection || prepared.SelectedMembers.Contains(member))
             .DistinctBy(member => Normalize(member.Name), StringComparer.OrdinalIgnoreCase)
             .ToList();
         if (selected.Count == 0)
@@ -178,8 +267,11 @@ public sealed class DrawExecutionService : IDrawExecutionService
         if (!prepared.AutoResetRecorded && prepared.CommittedNames.Count > 0 && ShouldRecordAutoReset(prepared.DrawMode))
         {
             prepared.AutoResetRecorded = true;
-            prepared.WasAutoReset = AutoResetService.RecordSuccessfulDraw(_data.State);
+            prepared.WasAutoReset = AutoResetService.RecordSuccessfulDraw(_data.State.Settings, _data.ActiveClassroom.Members);
         }
+
+        // 已确认的成员计入本轮已抽名单（用于一轮不重复）
+        RecordRoundNames(prepared, selected);
 
         await _data.SaveAsync(cancellationToken);
 
@@ -208,9 +300,13 @@ public sealed class DrawExecutionService : IDrawExecutionService
         _data.State.Settings.DrawsSinceLastAutoReset = prepared.DrawsSinceLastAutoReset;
         if (prepared.HistoryEntry is not null)
         {
-            _data.State.DrawHistory.Remove(prepared.HistoryEntry);
+            _data.ActiveClassroom.DrawHistory.Remove(prepared.HistoryEntry);
             prepared.HistoryEntry = null;
         }
+
+        // 恢复 Prepare 时刻的轮次状态
+        _data.ActiveClassroom.Round.RoundNumber = prepared.RoundNumber;
+        _data.ActiveClassroom.Round.DrawnNames = prepared.RoundDrawnNames.ToList();
 
         prepared.CommittedNames.Clear();
         prepared.AutoResetRecorded = false;
@@ -224,7 +320,7 @@ public sealed class DrawExecutionService : IDrawExecutionService
                 remaining,
                 confirmSelection: prepared.DrawMode == DrawMode.Selection,
                 notify: false,
-                cancellationToken);
+                cancellationToken: cancellationToken);
             return;
         }
 
@@ -234,12 +330,218 @@ public sealed class DrawExecutionService : IDrawExecutionService
     public Task DiscardAsync(PreparedDraw prepared, CancellationToken cancellationToken = default) =>
         RebuildCommittedStateAsync(prepared, [], cancellationToken);
 
+    /// <summary>
+    /// 课堂「换一个」：回滚被替换成员的全部副作用（被点次数、历史、本轮已抽标记），
+    /// 然后按相同规则重新抽一人并直接提交。
+    /// </summary>
+    public async Task<DrawReplaceOutcome> ReplaceAsync(
+        PreparedDraw prepared,
+        Member replacedMember,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(prepared);
+        ArgumentNullException.ThrowIfNull(replacedMember);
+
+        // 1. 快照当前状态，以便替换失败时回滚
+        var classroom = _data.ActiveClassroom;
+        var classroomSnapshot = classroom.Clone();
+
+        // 2. 回滚被替换成员的副作用
+        var remaining = prepared.SelectedMembers
+            .Where(member => !string.Equals(Normalize(member.Name), Normalize(replacedMember.Name), StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        await RebuildCommittedStateAsync(prepared, remaining, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // 3. 重新抽取一人（排除被替换者，避免抽回原人）
+        var filterNames = remaining
+            .Concat([replacedMember])
+            .Select(member => Normalize(member.Name))
+            .Where(name => name.Length > 0)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var drawFilters = prepared.Filters;
+        var replacement = DrawReplacementCandidate(
+            classroom,
+            prepared.DrawMode,
+            drawFilters,
+            filterNames,
+            _settings.Current.DrawNoRepeatInRound);
+
+        if (replacement is null)
+        {
+            // 无可用候选，恢复原状
+            RestoreClassroomSnapshot(classroom, classroomSnapshot);
+            await _data.SaveAsync(cancellationToken);
+            return new DrawReplaceOutcome(false, null, [], "没有可替换的候选人。");
+        }
+
+        // 4. 提交新成员（计入次数与历史）。替换出的新成员不在原 SelectedMembers 中，
+        //    需以 allowOutsideSelection 绕过提交时的成员归属校验。
+        var outcome = await CommitAsync(prepared, [replacement], notify: true, allowOutsideSelection: true, cancellationToken: cancellationToken);
+        if (!outcome.Succeeded)
+        {
+            RestoreClassroomSnapshot(classroom, classroomSnapshot);
+            await _data.SaveAsync(cancellationToken);
+            return new DrawReplaceOutcome(false, null, [], "替换失败，已恢复原状。");
+        }
+
+        // 5. 标记原成员为被替换（历史留痕）
+        MarkReplacedInHistory(prepared, replacedMember.Name);
+
+        return new DrawReplaceOutcome(
+            true,
+            replacement,
+            classroom.Round.DrawnNamesSet().ToArray(),
+            null);
+    }
+
+    private Member? DrawReplacementCandidate(
+        Classroom classroom,
+        DrawMode mode,
+        DrawFilterOptions filters,
+        IReadOnlySet<string> excludedNames,
+        bool noRepeatInRound)
+    {
+        // 排除被替换者本人与请假成员；替换抽取仍需遵守一轮不重复（仅在开关开启时）
+        var roundNames = noRepeatInRound
+            ? classroom.Round.DrawnNamesSet()
+            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var absentNames = DrawFilterService.GetAbsentNames(classroom.Members);
+        var drawFilters = filters with
+        {
+            ExcludeAbsentNames = absentNames,
+            ExcludeRoundDrawnNames = roundNames
+        };
+
+        var candidates = DrawFilterService.Apply(
+            classroom.Members,
+            classroom.Groups,
+            classroom.DrawHistory,
+            drawFilters,
+            classroom.SeatMap)
+            .Where(member => !excludedNames.Contains(Normalize(member.Name)))
+            .ToList();
+
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
+        var result = _drawService.Draw(candidates, classroom.Groups, 1, new DrawOptions(mode));
+        return result.SelectedMembers.FirstOrDefault();
+    }
+
+    private void MarkReplacedInHistory(PreparedDraw prepared, string replacedName)
+    {
+        var entry = prepared.HistoryEntry;
+        if (entry is null)
+        {
+            return;
+        }
+
+        var record = entry.Records.FirstOrDefault(record =>
+            string.Equals(record.Name, replacedName, StringComparison.OrdinalIgnoreCase));
+        if (record is not null)
+        {
+            record.WasReplaced = true;
+        }
+    }
+
+    /// <summary>
+    /// 为抽取记录写入课堂表现评价。评价只作用于已确认（已提交历史）的成员；
+    /// 若设置开启评价影响权重，同步调整成员当前的显式权重并落盘。
+    /// </summary>
+    public async Task<bool> RateAsync(
+        PreparedDraw prepared,
+        string memberName,
+        DrawRating rating,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(prepared);
+        if (string.IsNullOrWhiteSpace(memberName))
+        {
+            throw new ArgumentException("成员姓名不能为空。", nameof(memberName));
+        }
+
+        prepared.HistoryEntry?.EnsureRecords();
+        var record = prepared.HistoryEntry?.Records.FirstOrDefault(item =>
+            string.Equals(item.Name, memberName, StringComparison.OrdinalIgnoreCase));
+        if (record is null)
+        {
+            return false;
+        }
+
+        record.Rating = rating;
+
+        var member = _data.ActiveClassroom.Members.FirstOrDefault(item =>
+            string.Equals(item.Name, memberName, StringComparison.OrdinalIgnoreCase));
+        if (member is not null)
+        {
+            var settings = _settings.Current;
+            if (settings.RatingAffectsWeight && rating is DrawRating.Excellent or DrawRating.Fair)
+            {
+                var multiplier = rating == DrawRating.Excellent
+                    ? settings.RatingWeightMultiplier
+                    : settings.RatingFairMultiplier;
+                MemberRules.ApplyRatingAdjustment(member, rating, multiplier);
+            }
+        }
+
+        await _data.SaveAsync(cancellationToken);
+        return true;
+    }
+
+    private static void RestoreClassroomSnapshot(Classroom classroom, Classroom snapshot)
+    {
+        classroom.Members = snapshot.Members;
+        classroom.Groups = snapshot.Groups;
+        classroom.DrawHistory = snapshot.DrawHistory;
+        classroom.DrawPresets = snapshot.DrawPresets;
+        classroom.Round = snapshot.Round;
+        classroom.SeatMap = snapshot.SeatMap;
+        classroom.Subject = snapshot.Subject;
+    }
+
+    /// <summary>
+    /// 把已确认成员写入本轮已抽名单。丢弃/回滚时由 <see cref="RebuildCommittedStateAsync"/> 的
+    /// 快照恢复逻辑一并撤销（见 <see cref="RoundSnapshot"/>）。
+    /// </summary>
+    private void RecordRoundNames(PreparedDraw prepared, IReadOnlyList<Member> selected)
+    {
+        var round = _data.ActiveClassroom.Round;
+        foreach (var member in selected)
+        {
+            var normalized = Normalize(member.Name);
+            if (round.DrawnNames.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            round.DrawnNames.Add(normalized);
+        }
+    }
+
     private void UpdateHistory(PreparedDraw prepared)
     {
         var names = prepared.SelectedMembers
             .Where(member => prepared.CommittedNames.Contains(Normalize(member.Name)))
             .Select(member => member.Name)
             .ToList();
+
+        // 「换一个」替换出的新成员不在 SelectedMembers 中，需并入历史（用班级名单还原显示名）
+        if (names.Count < prepared.CommittedNames.Count)
+        {
+            var classroomByName = _data.ActiveClassroom.Members
+                .GroupBy(member => Normalize(member.Name), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First().Name, StringComparer.OrdinalIgnoreCase);
+            names = [
+                .. names,
+                .. prepared.CommittedNames
+                    .Where(name => !names.Contains(name, StringComparer.OrdinalIgnoreCase))
+                    .Select(name => classroomByName.TryGetValue(name, out var display) ? display : name)
+            ];
+        }
+
         if (names.Count == 0)
         {
             return;
@@ -250,13 +552,36 @@ public sealed class DrawExecutionService : IDrawExecutionService
             prepared.HistoryEntry = new DrawHistoryEntry
             {
                 DrawnAt = DateTimeOffset.Now,
-                MemberNames = names
+                MemberNames = names,
+                RoundNumber = prepared.RoundNumber
             };
-            _data.State.DrawHistory.Add(prepared.HistoryEntry);
+            _data.ActiveClassroom.DrawHistory.Add(prepared.HistoryEntry);
+            _ = StampClassContextAsync(prepared.HistoryEntry);
             return;
         }
 
         prepared.HistoryEntry.MemberNames = names;
+    }
+
+    /// <summary>
+    /// 异步查询 ClassIsland 课时上下文并写入历史条目（科目、第几节）。
+    /// 查询失败或未连接时静默跳过，不影响提交结果。
+    /// </summary>
+    private async Task StampClassContextAsync(DrawHistoryEntry entry)
+    {
+        try
+        {
+            var context = await _classIslandNotifications.QueryClassContextAsync(CancellationToken.None);
+            if (context.Succeeded && context.Context is { } ctx)
+            {
+                entry.Subject = ctx.Subject;
+                entry.PeriodIndex = ctx.PeriodIndex;
+            }
+        }
+        catch
+        {
+            // 课时信息是增强字段，失败不阻塞
+        }
     }
 
     private static bool ShouldRecordAutoReset(DrawMode mode) =>
@@ -273,7 +598,7 @@ public sealed class DrawExecutionService : IDrawExecutionService
 
     private void RestoreSnapshots(IReadOnlyDictionary<string, MemberSnapshot> snapshots)
     {
-        foreach (var member in _data.State.Members)
+        foreach (var member in _data.ActiveClassroom.Members)
         {
             if (snapshots.TryGetValue(Normalize(member.Name), out var snapshot))
             {
@@ -297,3 +622,5 @@ public sealed class DrawExecutionService : IDrawExecutionService
         }
     }
 }
+
+

@@ -73,7 +73,7 @@ public sealed class FirstRunWizardService
 
     private void LoadGroups()
     {
-        var groups = _data.State.Groups.Select(g => g.GroupName).OrderBy(n => n).ToList();
+        var groups = _data.ActiveClassroom.Groups.Select(g => g.GroupName).OrderBy(n => n).ToList();
         _include.ItemsSource = new[] { "不限制" }.Concat(groups).ToList();
         _exclude.ItemsSource = new[] { "不排除" }.Concat(groups).ToList();
         _include.SelectedIndex = Math.Max(0, groups.FindIndex(n => string.Equals(n, _settings.Current.DrawIncludeGroupName, StringComparison.OrdinalIgnoreCase)) + 1);
@@ -112,7 +112,7 @@ public sealed class FirstRunWizardService
                 _dialog.SecondaryButtonText = "上一步";
                 break;
             default:
-                _content.Children.Add(new TextBlock { Text = $"成员：{_data.State.Members.Count} 人\n小组：{_data.State.Groups.Count} 个\n点名模式：{_mode.SelectedItem}\n抽取人数：{Math.Max(1, (int)Math.Round(_count.Value))}\n历史筛选：{(_never.IsChecked == true ? "仅从未抽取成员" : "不限制")}\n小组筛选：{(_include.SelectedIndex > 0 || _exclude.SelectedIndex > 0 ? "已设置" : "不限制")}", TextWrapping = TextWrapping.Wrap });
+                _content.Children.Add(new TextBlock { Text = $"成员：{_data.ActiveClassroom.Members.Count} 人\n小组：{_data.ActiveClassroom.Groups.Count} 个\n点名模式：{_mode.SelectedItem}\n抽取人数：{Math.Max(1, (int)Math.Round(_count.Value))}\n历史筛选：{(_never.IsChecked == true ? "仅从未抽取成员" : "不限制")}\n小组筛选：{(_include.SelectedIndex > 0 || _exclude.SelectedIndex > 0 ? "已设置" : "不限制")}", TextWrapping = TextWrapping.Wrap });
                 _dialog.Title = "设置完成";
                 _dialog.PrimaryButtonText = "完成并开始使用";
                 _dialog.SecondaryButtonText = "上一步";
@@ -160,11 +160,11 @@ public sealed class FirstRunWizardService
 
     private async Task PreviewNamesAsync()
     {
-        var preview = _memberImport.PreviewImport(_names.Text, _data.State.Members);
+        var preview = _memberImport.PreviewImport(_names.Text, _data.ActiveClassroom.Members);
         _preview.Text = $"可新增 {preview.AddCount} 人，跳过 {preview.SkipCount} 行" + (preview.HasErrors ? "，存在格式错误" : "。");
         if (!preview.HasErrors && preview.AddCount > 0)
         {
-            var members = _data.State.Members.Select(m => m.Clone()).ToList();
+            var members = _data.ActiveClassroom.Members.Select(m => m.Clone()).ToList();
             _memberImport.ApplyImport(preview, members);
             await _data.ReplaceMembersAsync(members);
         }

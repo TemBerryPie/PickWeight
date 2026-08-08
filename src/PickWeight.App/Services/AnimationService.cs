@@ -30,6 +30,43 @@ public sealed class AnimationService
     public void PlayPopupEntrance(UIElement element) =>
         Play(element, 0d, 480d, new Vector2(0f, 20f), 0.075d);
 
+    /// <summary>
+    /// 快速名字滚动动画：仅轻微缩放脉冲，不启动 Opacity 动画、不把 Opacity 置零，
+    /// 避免抽取滚动阶段快速节拍下每拍淡入淡出造成的闪烁。完成后由 Reset 复位。
+    /// </summary>
+    public void PlayNameTick(UIElement element)
+    {
+        Stop(element);
+
+        var visual = ElementCompositionPreview.GetElementVisual(element);
+        var compositor = visual.Compositor;
+        var speed = Math.Clamp(_settings.Current.AnimationSpeed, 0.5d, 2d);
+        var motion = Math.Clamp(_settings.Current.AnimationMotionScale, 0d, 2d);
+        var bounce = Math.Clamp(_settings.Current.AnimationBounceScale, 0d, 2d);
+        var duration = TimeSpan.FromMilliseconds(70d / speed);
+        var runId = ++_nextRunId;
+
+        visual.CenterPoint = new Vector3(element.ActualSize.X / 2f, element.ActualSize.Y / 2f, 0f);
+        _activeRuns[element] = runId;
+
+        var batch = compositor.CreateScopedBatch(CompositionBatchTypes.Animation);
+        visual.StartAnimation(ScaleAnimation, CreateScaleAnimation(
+            compositor,
+            (float)(0.035d * motion),
+            (float)bounce,
+            duration,
+            TimeSpan.Zero));
+        batch.End();
+        batch.Completed += (_, _) =>
+        {
+            if (_activeRuns.TryGetValue(element, out var activeRunId) && activeRunId == runId)
+            {
+                _activeRuns.Remove(element);
+                Reset(visual);
+            }
+        };
+    }
+
     public void PlayPageSection(UIElement element, int sectionIndex)
     {
         var horizontalDirection = sectionIndex % 2 == 0 ? -1f : 1f;

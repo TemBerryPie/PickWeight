@@ -8,6 +8,14 @@ BundleArtifacts/
 Generated Files/
 **/cipx/
 
+# Published artifacts must never be committed.
+dist/
+# Source-tree test artifacts must never be committed.
+src/PickWeight.App/dist/
+
 # Runtime roster/configuration must never be committed.
 **/implicit_config.json
 dist/*.txt
+
+# Scratch/debug helper scripts.
+run*.bat

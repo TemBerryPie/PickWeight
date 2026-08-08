@@ -12,6 +12,7 @@ public sealed class Plugin : PluginBase
     public override void Initialize(HostBuilderContext context, IServiceCollection services)
     {
         services.AddSingleton<NotificationProviderAccessor>();
+        services.AddSingleton<PickWeightClassContextService>();
         services.AddNotificationProvider<PickWeightNotificationProvider, PickWeightNotificationSettingsControl>();
         services.AddHostedService<PickWeightPipeListenerService>();
     }

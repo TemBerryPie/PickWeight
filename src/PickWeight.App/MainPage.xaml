@@ -14,14 +14,39 @@
         IsSettingsVisible="True"
         CompactPaneLength="56"
         OpenPaneLength="280"
-        PaneDisplayMode="LeftMinimal"
+        PaneDisplayMode="Left"
         SelectionChanged="Navigation_SelectionChanged">
         <NavigationView.MenuItems>
             <NavigationViewItem Content="开始点名" Icon="Play" Tag="draw" />
             <NavigationViewItem Content="统计分析" Icon="Clock" Tag="history" />
             <NavigationViewItem Content="权重编辑器" Icon="Contact" Tag="members" />
             <NavigationViewItem Content="小组绑定器" Icon="People" Tag="groups" />
+            <NavigationViewItem Content="座位表" Icon="ViewAll" Tag="seats" />
         </NavigationView.MenuItems>
+        <NavigationView.PaneCustomContent>
+            <StackPanel Padding="4,8" Spacing="4">
+                <TextBlock
+                    x:Name="ClassroomLabel"
+                    Margin="12,0"
+                    FontSize="12"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="当前班级"
+                    Visibility="Collapsed" />
+                <DropDownButton
+                    x:Name="ClassroomSwitcher"
+                    Margin="4,0"
+                    AutomationProperties.Name="切换班级"
+                    Click="ClassroomSwitcher_Click">
+                    <DropDownButton.Flyout>
+                        <MenuFlyout />
+                    </DropDownButton.Flyout>
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon FontSize="14" Glyph="&#xE716;" />
+                        <TextBlock x:Name="ClassroomNameText" Text="班级" />
+                    </StackPanel>
+                </DropDownButton>
+            </StackPanel>
+        </NavigationView.PaneCustomContent>
         <Frame x:Name="ContentFrame" />
     </NavigationView>
 </Page>

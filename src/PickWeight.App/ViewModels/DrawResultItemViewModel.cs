@@ -8,8 +8,12 @@ public partial class DrawResultItemViewModel : ObservableObject
 {
     private readonly Func<DrawResultItemViewModel, Task> _commitAsync;
     private readonly Func<DrawResultItemViewModel, Task> _discardAsync;
+    private readonly Func<DrawResultItemViewModel, Task> _replaceAsync = _ => Task.CompletedTask;
+    private readonly Func<DrawResultItemViewModel, DrawRating, Task<bool>> _rateAsync = (_, _) => Task.FromResult(false);
     private bool _isCommitted;
     private bool _isDiscarded;
+    private DrawRating _rating = DrawRating.None;
+    private string? _seatPosition;
 
     public DrawResultItemViewModel(
         Member member,
@@ -17,27 +21,37 @@ public partial class DrawResultItemViewModel : ObservableObject
         DrawMode drawMode,
         bool isCommitted,
         bool allowsManualCommit,
+        string? seatPosition,
         Func<DrawResultItemViewModel, Task> commitAsync,
-        Func<DrawResultItemViewModel, Task> discardAsync)
+        Func<DrawResultItemViewModel, Task> discardAsync,
+        Func<DrawResultItemViewModel, Task>? replaceAsync = null,
+        Func<DrawResultItemViewModel, DrawRating, Task<bool>>? rateAsync = null)
     {
         Member = member;
         DrawMode = drawMode;
+        SeatPosition = seatPosition;
         ExplicitWeight = weights.ExplicitWeight;
         CalledWeight = weights.CalledWeight;
         IsCommitted = isCommitted;
         AllowsManualCommit = allowsManualCommit;
         _commitAsync = commitAsync;
         _discardAsync = discardAsync;
+        _replaceAsync = replaceAsync ?? (_ => Task.CompletedTask);
+        _rateAsync = rateAsync ?? ((_, _) => Task.FromResult(false));
+        CanReplace = _replaceAsync is not null;
     }
 
     public Member Member { get; }
     public DrawMode DrawMode { get; }
     public string Name => Member.Name;
+    public string? SeatPosition { get; private set; }
+    public bool IsSeated => !string.IsNullOrWhiteSpace(SeatPosition);
     public double ExplicitWeight { get; }
     public double CalledWeight { get; }
     public bool AllowsManualCommit { get; }
     public bool CanCommitResult => AllowsManualCommit && !IsCommitted && !IsDiscarded;
     public bool CanDiscardResult => !IsDiscarded;
+    public bool CanReplace { get; }
 
     public string WeightText => DrawMode switch
     {
@@ -91,9 +105,45 @@ public partial class DrawResultItemViewModel : ObservableObject
         }
     }
 
+    /// <summary>当前评价等级。</summary>
+    public DrawRating Rating
+    {
+        get => _rating;
+        private set
+        {
+            if (SetProperty(ref _rating, value))
+            {
+                OnPropertyChanged(nameof(HasRating));
+                OnPropertyChanged(nameof(RatingText));
+                NotifyRatingCommands();
+            }
+        }
+    }
+
+    /// <summary>是否已经给出评价，用于显示「已评价」小字。</summary>
+    public bool HasRating => Rating != DrawRating.None;
+
+    /// <summary>评价结果的中文文本，未评价时为空。</summary>
+    public string RatingText => Rating switch
+    {
+        DrawRating.Excellent => "已评价：良好",
+        DrawRating.Fair => "已评价：一般",
+        DrawRating.NoAnswer => "已评价：未答上",
+        DrawRating.Volunteered => "已评价：主动",
+        _ => string.Empty
+    };
+
     public void MarkCommitted()
     {
         IsCommitted = true;
+    }
+
+    public void UpdateSeatPosition(string? seatPosition)
+    {
+        if (SetProperty(ref _seatPosition, seatPosition))
+        {
+            OnPropertyChanged(nameof(IsSeated));
+        }
     }
 
     public void MarkDiscarded()
@@ -107,7 +157,34 @@ public partial class DrawResultItemViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanDiscardExecute))]
     private Task DiscardAsync() => _discardAsync(this);
 
+    [RelayCommand]
+    private Task ReplaceAsync() => _replaceAsync(this);
+
     private bool CanDiscardExecute() => CanDiscardResult;
+
+    [RelayCommand]
+    private async Task RateGoodAsync()
+    {
+        if (await _rateAsync(this, DrawRating.Excellent))
+        {
+            Rating = DrawRating.Excellent;
+        }
+    }
+
+    [RelayCommand]
+    private async Task RateFairAsync()
+    {
+        if (await _rateAsync(this, DrawRating.Fair))
+        {
+            Rating = DrawRating.Fair;
+        }
+    }
+
+    private void NotifyRatingCommands()
+    {
+        RateGoodCommand.NotifyCanExecuteChanged();
+        RateFairCommand.NotifyCanExecuteChanged();
+    }
 
     private void NotifyStateChanged()
     {
@@ -116,5 +193,6 @@ public partial class DrawResultItemViewModel : ObservableObject
         OnPropertyChanged(nameof(StateText));
         CommitCommand.NotifyCanExecuteChanged();
         DiscardCommand.NotifyCanExecuteChanged();
+        ReplaceCommand.NotifyCanExecuteChanged();
     }
 }

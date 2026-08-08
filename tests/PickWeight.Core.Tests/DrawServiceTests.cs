@@ -164,31 +164,28 @@ public sealed class DrawServiceTests
     [Fact]
     public void AutoReset_ResetsWeightsAndCountsWhenIntervalIsReached()
     {
-        var state = new AppState
+        var members = new List<Member>
         {
-            Members =
-            [
-                new Member { Name = "A", ExplicitWeight = 250d, CalledCount = 4, IsWeightLinked = false },
-                new Member { Name = "B", ExplicitWeight = 80d, CalledCount = 2, IsWeightLinked = false }
-            ],
-            Settings = new AppSettings
-            {
-                AutoResetWeights = true,
-                AutoResetDrawInterval = 2,
-                DrawsSinceLastAutoReset = 1
-            }
+            new() { Name = "A", ExplicitWeight = 250d, CalledCount = 4, IsWeightLinked = false },
+            new() { Name = "B", ExplicitWeight = 80d, CalledCount = 2, IsWeightLinked = false }
+        };
+        var settings = new AppSettings
+        {
+            AutoResetWeights = true,
+            AutoResetDrawInterval = 2,
+            DrawsSinceLastAutoReset = 1
         };
 
-        var reset = AutoResetService.RecordSuccessfulDraw(state);
+        var reset = AutoResetService.RecordSuccessfulDraw(settings, members);
 
         Assert.True(reset);
-        Assert.All(state.Members, member =>
+        Assert.All(members, member =>
         {
             Assert.Equal(100d, member.ExplicitWeight);
             Assert.Equal(0, member.CalledCount);
             Assert.True(member.IsWeightLinked);
         });
-        Assert.Equal(0, state.Settings.DrawsSinceLastAutoReset);
+        Assert.Equal(0, settings.DrawsSinceLastAutoReset);
     }
 
     private static DrawProbabilityPreview Find(IEnumerable<DrawProbabilityPreview> preview, string name) =>

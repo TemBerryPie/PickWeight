@@ -21,6 +21,7 @@ public sealed class SettingsChangedEventArgs : EventArgs
         ShowDrawNotificationsChanged ||
         ShowClassIslandNotificationsChanged ||
         AutoResetChanged ||
+        FairnessReminderDaysChanged ||
         BackgroundChanged ||
         AnimationChanged;
 
@@ -31,7 +32,11 @@ public sealed class SettingsChangedEventArgs : EventArgs
         !string.Equals(Previous.DrawIncludeGroupName, Current.DrawIncludeGroupName, StringComparison.Ordinal) ||
         !string.Equals(Previous.DrawExcludeGroupName, Current.DrawExcludeGroupName, StringComparison.Ordinal) ||
         Previous.DrawExcludeRecentDrawCount != Current.DrawExcludeRecentDrawCount ||
-        Previous.DrawOnlyNeverDrawn != Current.DrawOnlyNeverDrawn;
+        Previous.DrawOnlyNeverDrawn != Current.DrawOnlyNeverDrawn ||
+        Previous.DrawNoRepeatInRound != Current.DrawNoRepeatInRound ||
+        Previous.DrawSeatRegion != Current.DrawSeatRegion ||
+        Previous.DrawSeatColumn != Current.DrawSeatColumn ||
+        Previous.DrawSeatRow != Current.DrawSeatRow;
     public bool ThemeChanged => Previous.Theme != Current.Theme;
     public bool StartWithWindowsChanged => Previous.StartWithWindows != Current.StartWithWindows;
     public bool ShowQuickDrawButtonChanged => Previous.ShowQuickDrawButton != Current.ShowQuickDrawButton;
@@ -43,6 +48,10 @@ public sealed class SettingsChangedEventArgs : EventArgs
         Previous.AutoResetWeights != Current.AutoResetWeights ||
         Previous.AutoResetDrawInterval != Current.AutoResetDrawInterval ||
         Previous.DrawsSinceLastAutoReset != Current.DrawsSinceLastAutoReset;
+
+    /// <summary>长期未点提醒阈值变化，需要重新计算提醒名单。</summary>
+    public bool FairnessReminderDaysChanged =>
+        Previous.FairnessReminderDays != Current.FairnessReminderDays;
 
     public bool BackgroundChanged =>
         Previous.BackgroundEffect != Current.BackgroundEffect ||

@@ -42,6 +42,7 @@
         </VisualStateManager.VisualStateGroups>
 
         <ScrollViewer
+            x:Name="SettingsListScrollViewer"
             HorizontalContentAlignment="Stretch"
             HorizontalScrollBarVisibility="Disabled"
             HorizontalScrollMode="Disabled">
@@ -117,6 +118,46 @@
                     </Button>
 
                     <Button
+                        x:Name="RatingCategoryCard"
+                        AutomationProperties.Name="打开评价与权重设置"
+                        Click="RatingCategoryCard_Click"
+                        Style="{StaticResource SettingsCategoryButtonStyle}">
+                        <Grid ColumnSpacing="18">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="44" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon FontSize="28" Glyph="&#xE735;" />
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="3">
+                                <TextBlock Style="{ThemeResource SubtitleTextBlockStyle}" Text="评价与权重" />
+                                <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="课堂表现评价对权重的影响" TextWrapping="Wrap" />
+                            </StackPanel>
+                            <FontIcon Grid.Column="2" VerticalAlignment="Center" FontSize="16" Glyph="&#xE76C;" />
+                        </Grid>
+                    </Button>
+
+                    <Button
+                        x:Name="HistoryArchiveCategoryCard"
+                        AutomationProperties.Name="打开历史与归档设置"
+                        Click="HistoryArchiveCategoryCard_Click"
+                        Style="{StaticResource SettingsCategoryButtonStyle}">
+                        <Grid ColumnSpacing="18">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="44" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon FontSize="28" Glyph="&#xE81C;" />
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="3">
+                                <TextBlock Style="{ThemeResource SubtitleTextBlockStyle}" Text="历史与归档" />
+                                <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="历史保留天数、归档数据统计" TextWrapping="Wrap" />
+                            </StackPanel>
+                            <FontIcon Grid.Column="2" VerticalAlignment="Center" FontSize="16" Glyph="&#xE76C;" />
+                        </Grid>
+                    </Button>
+
+                    <Button
                         x:Name="NotificationCategoryCard"
                         AutomationProperties.Name="打开通知设置"
                         Click="NotificationCategoryCard_Click"
@@ -155,75 +196,16 @@
                             <FontIcon Grid.Column="2" VerticalAlignment="Center" FontSize="16" Glyph="&#xE76C;" />
                         </Grid>
                     </Button>
+
                 </StackPanel>
             </StackPanel>
         </ScrollViewer>
 
-        <ContentDialog x:Name="SystemSettingsDialog" CloseButtonText="关闭" Opened="SettingsDialog_Opened" Title="系统设置">
-            <StackPanel x:Name="SystemSettingsSection" Spacing="16">
-                <ToggleSwitch Header="开机自启" IsOn="{Binding StartWithWindows, Mode=TwoWay}" OffContent="关闭" OnContent="开启" />
-                <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="程序将在登录 Windows 后自动运行。" TextWrapping="Wrap" />
-                <ToggleSwitch Header="快捷启动功能" IsOn="{Binding ShowQuickDrawButton, Mode=TwoWay}" OffContent="关闭" OnContent="开启" />
-                <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="启用后显示可拖动的快捷启动小窗。" TextWrapping="Wrap" />
-                <TextBox Header="全局快捷键" PlaceholderText="Ctrl+Alt+P" Text="{Binding GlobalHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="仅支持 Ctrl+Alt+字母，例如 Ctrl+Alt+P；主窗口隐藏时也可触发快速抽取。" TextWrapping="Wrap" />
-                <Button Click="FirstRunWizard_Click" Content="重新运行首次运行引导" />
-                <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="重新配置成员和点名规则，不会删除现有数据。" TextWrapping="Wrap" />
-                <Button Click="ShowLocalApiToken_Click" Content="查看本地 API 令牌" />
-                <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="本地 API 仅监听 127.0.0.1:17861，外部脚本需在 X-PickWeight-Token 请求头中携带令牌。" TextWrapping="Wrap" />
-            </StackPanel>
-        </ContentDialog>
-
-        <ContentDialog x:Name="DrawSettingsDialog" CloseButtonText="关闭" Opened="SettingsDialog_Opened" Title="点名设置">
-            <StackPanel x:Name="DrawSettingsSection" Spacing="16">
-                <ComboBox Header="默认点名模式" SelectedIndex="{Binding SelectedDrawModeIndex, Mode=TwoWay}">
-                    <ComboBoxItem Content="加权模式" />
-                    <ComboBoxItem Content="智能随机" />
-                    <ComboBoxItem Content="完全随机" />
-                    <ComboBoxItem Content="选择模式" />
-                </ComboBox>
-                <ToggleSwitch Header="自动重置" IsOn="{Binding AutoResetWeights, Mode=TwoWay}" OffContent="关闭" OnContent="开启" />
-                <NumberBox Header="抽取多少次后自动重置" IsEnabled="{Binding IsAutoResetIntervalEnabled}" Maximum="10000" Minimum="1" SpinButtonPlacementMode="Inline" Value="{Binding AutoResetDrawInterval, Mode=TwoWay}" />
-                <NumberBox Header="长期未被点提醒（天）" Maximum="365" Minimum="1" SpinButtonPlacementMode="Inline" Value="{Binding FairnessReminderDays, Mode=TwoWay}" />
-            </StackPanel>
-        </ContentDialog>
-
-        <ContentDialog x:Name="NotificationSettingsDialog" CloseButtonText="关闭" Opened="SettingsDialog_Opened" Title="通知">
-            <StackPanel x:Name="NotificationSettingsSection" Spacing="16">
-                <ToggleSwitch Header="抽取结果通知" IsOn="{Binding ShowDrawNotifications, Mode=TwoWay}" OffContent="关闭" OnContent="开启" />
-                <ToggleSwitch Header="ClassIsland 抽取提醒" IsOn="{Binding ShowClassIslandNotifications, Mode=TwoWay}" OffContent="关闭" OnContent="开启" />
-                <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="ClassIsland 未连接时，点名结果仍会正常保存。" TextWrapping="Wrap" />
-            </StackPanel>
-        </ContentDialog>
-
-        <ContentDialog x:Name="AppearanceSettingsDialog" CloseButtonText="关闭" Opened="SettingsDialog_Opened" Title="外观和个性化">
-            <ScrollViewer MaxHeight="520" HorizontalScrollBarVisibility="Disabled" HorizontalScrollMode="Disabled">
-                <StackPanel x:Name="AppearanceSettingsSection" Spacing="16">
-                    <ComboBox Header="界面主题" SelectedIndex="{Binding SelectedThemeIndex, Mode=TwoWay}">
-                        <ComboBoxItem Content="跟随系统" />
-                        <ComboBoxItem Content="浅色" />
-                        <ComboBoxItem Content="深色" />
-                    </ComboBox>
-                    <ComboBox Header="背景效果" SelectedIndex="{Binding SelectedBackgroundEffectIndex, Mode=TwoWay}">
-                        <ComboBoxItem Content="亚克力 Acrylic" />
-                        <ComboBoxItem Content="云母 Mica" />
-                    </ComboBox>
-                    <Slider Header="Acrylic 背景强度" IsEnabled="{Binding IsAcrylicSelected}" Maximum="1" Minimum="0" SmallChange="0.01" StepFrequency="0.01" Value="{Binding AcrylicBlurAmount, Mode=TwoWay}" />
-                    <TextBlock Style="{ThemeResource SubtitleTextBlockStyle}" Text="动画" />
-                    <Slider Header="动画速度" Maximum="2" Minimum="0.5" SmallChange="0.1" StepFrequency="0.1" Value="{Binding AnimationSpeed, Mode=TwoWay}" />
-                    <Slider Header="动画运动幅度" Maximum="2" Minimum="0" SmallChange="0.1" StepFrequency="0.1" Value="{Binding AnimationMotionScale, Mode=TwoWay}" />
-                    <Slider Header="动画回弹幅度" Maximum="2" Minimum="0" SmallChange="0.1" StepFrequency="0.1" Value="{Binding AnimationBounceScale, Mode=TwoWay}" />
-                    <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="默认值均为 1.0；将运动或回弹幅度设为 0 可关闭对应效果。" TextWrapping="Wrap" />
-                    <Grid ColumnSpacing="8">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <Button Command="{Binding RestoreDefaultsCommand}" Content="恢复默认" />
-                        <Button Grid.Column="1" Command="{Binding PreviewAnimationCommand}" Content="预览动画" />
-                    </Grid>
-                </StackPanel>
-            </ScrollViewer>
-        </ContentDialog>
+        <Frame
+            x:Name="SettingsFrame"
+            HorizontalAlignment="Stretch"
+            Navigated="SettingsFrame_Navigated"
+            VerticalAlignment="Stretch"
+            Visibility="Collapsed" />
     </Grid>
 </Page>

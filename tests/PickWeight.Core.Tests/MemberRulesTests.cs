@@ -56,4 +56,55 @@ public sealed class MemberRulesTests
 
         Assert.Throws<InvalidDataException>(() => MemberRules.Validate(member));
     }
+
+    [Fact]
+    public void RatingMultiplier_GoodUses070AndFairUses090()
+    {
+        Assert.Equal(0.7d, MemberRules.RatingMultiplier(DrawRating.Excellent));
+        Assert.Equal(0.9d, MemberRules.RatingMultiplier(DrawRating.Fair));
+        Assert.Null(MemberRules.RatingMultiplier(DrawRating.None));
+    }
+
+    [Fact]
+    public void ApplyRatingAdjustment_FairMultiplier_ScalesWeightAndMarksAdjusted()
+    {
+        var member = new Member { Name = "A", ExplicitWeight = 100d };
+
+        MemberRules.ApplyRatingAdjustment(member, DrawRating.Fair, 0.9d);
+
+        Assert.Equal(90d, member.ExplicitWeight);
+        Assert.True(member.IsWeightAdjustedByRating);
+    }
+
+    [Fact]
+    public void ApplyRatingAdjustment_GoodMultiplier_ScalesWeightAndMarksAdjusted()
+    {
+        var member = new Member { Name = "A", ExplicitWeight = 100d };
+
+        MemberRules.ApplyRatingAdjustment(member, DrawRating.Excellent, 0.7d);
+
+        Assert.Equal(70d, member.ExplicitWeight);
+        Assert.True(member.IsWeightAdjustedByRating);
+    }
+
+    [Fact]
+    public void ApplyRatingAdjustment_ClampsAtTenPercentOfDefaultWeight()
+    {
+        var member = new Member { Name = "A", ExplicitWeight = 100d };
+
+        MemberRules.ApplyRatingAdjustment(member, DrawRating.Fair, 0.01d);
+
+        Assert.Equal(MemberRules.DefaultExplicitWeight * 0.1d, member.ExplicitWeight);
+    }
+
+    [Fact]
+    public void ApplyRatingAdjustment_IgnoresNonExcellentOrFairRatings()
+    {
+        var member = new Member { Name = "A", ExplicitWeight = 100d };
+
+        MemberRules.ApplyRatingAdjustment(member, DrawRating.NoAnswer, 0.5d);
+
+        Assert.Equal(100d, member.ExplicitWeight);
+        Assert.False(member.IsWeightAdjustedByRating);
+    }
 }

@@ -118,10 +118,19 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    public async Task NavigateToSeatMapAsync(IReadOnlyList<string> highlightNames)
+    {
+        if (RootFrame.Content is MainPage mainPage)
+        {
+            await mainPage.NavigateToSeatMapAsync(highlightNames);
+        }
+    }
+
     private void RestoreWindowBounds()
     {
         var settings = App.GetService<PickWeight.Core.Abstractions.ISettingsService>().Current;
-        var width = settings.WindowWidth is >= 640 and <= 3840 ? settings.WindowWidth.Value : 1100;
+        // 常驻 280px 导航窗格时，内容区也需要足够的可用宽度，最小窗口宽度提高到 800。
+        var width = settings.WindowWidth is >= 800 and <= 3840 ? settings.WindowWidth.Value : 1100;
         var height = settings.WindowHeight is >= 480 and <= 2160 ? settings.WindowHeight.Value : 760;
         AppWindow.Resize(new Windows.Graphics.SizeInt32(width, height));
         if (settings.WindowX is >= 0 && settings.WindowY is >= 0)

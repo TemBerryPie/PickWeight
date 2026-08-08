@@ -12,18 +12,60 @@
         CornerRadius="20"
         Loaded="WindowRoot_Loaded"
         KeyDown="WindowRoot_KeyDown">
-        <TextBlock
-            x:Name="NameText"
-            HorizontalAlignment="Center"
-            VerticalAlignment="Center"
-            AutomationProperties.Name="抽取结果姓名"
-            FontSize="44"
-            FontWeight="SemiBold"
-            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-            IsTextSelectionEnabled="False"
-            MaxLines="1"
-            TextAlignment="Center"
-            TextTrimming="CharacterEllipsis"
-            TextWrapping="NoWrap" />
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <!-- 单人：巨大居中的名字 -->
+            <TextBlock
+                x:Name="NameText"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                AutomationProperties.Name="抽取结果姓名"
+                FontSize="44"
+                FontWeight="SemiBold"
+                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                IsTextSelectionEnabled="False"
+                TextAlignment="Center"
+                TextWrapping="Wrap" />
+
+            <!-- 多人：横排或网格的名字列表，逐个揭晓 -->
+            <ItemsControl
+                x:Name="NamesList"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                AutomationProperties.Name="多人抽取结果"
+                Visibility="Collapsed">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <VariableSizedWrapGrid MaximumRowsOrColumns="4" Orientation="Horizontal" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemContainerTransitions>
+                    <TransitionCollection>
+                        <EntranceThemeTransition FromVerticalOffset="40" IsStaggeringEnabled="False" />
+                        <RepositionThemeTransition IsStaggeringEnabled="False" />
+                    </TransitionCollection>
+                </ItemsControl.ItemContainerTransitions>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border
+                            Margin="8"
+                            Padding="20,12"
+                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="12">
+                            <TextBlock
+                                FontSize="40"
+                                FontWeight="SemiBold"
+                                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                Text="{Binding}" />
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </Grid>
     </Border>
 </Window>

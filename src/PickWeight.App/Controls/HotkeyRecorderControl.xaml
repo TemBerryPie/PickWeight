@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="PickWeight_App.Controls.HotkeyRecorderControl"
+    x:Name="HotkeyRecorderRoot"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <StackPanel Spacing="4">
+        <TextBlock
+            x:Name="HeaderText"
+            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+            IsTabStop="False"
+            Text="{Binding Header, ElementName=HotkeyRecorderRoot}" />
+        <Grid ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <!-- 点击开始录制；录制中再次点击可取消 -->
+            <Button
+                x:Name="CaptureButton"
+                MinHeight="32"
+                AutomationProperties.Name="录制快捷键"
+                Background="Transparent"
+                BorderThickness="1"
+                Click="CaptureButton_Click"
+                Content="{Binding DisplayText, ElementName=HotkeyRecorderRoot}"
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Left"
+                Padding="12,4" />
+
+            <Button
+                Grid.Column="1"
+                AutomationProperties.Name="清除快捷键"
+                Click="ClearButton_Click"
+                Content="清除" />
+        </Grid>
+    </StackPanel>
+</UserControl>

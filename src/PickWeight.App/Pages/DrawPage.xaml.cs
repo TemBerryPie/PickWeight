@@ -1,7 +1,9 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using PickWeight_App.Services;
 using PickWeight_App.ViewModels;
+using Windows.System;
 
 namespace PickWeight_App.Pages;
 
@@ -19,7 +21,70 @@ public sealed partial class DrawPage : Page
         DataContext = _viewModel;
         _viewModel.DrawStarted += BeginResultAnimation;
         _viewModel.DrawCompleted += AnimateRealizedResults;
+        _viewModel.InitializeAttendance();
         Loaded += (_, _) => PlayPageEntrance();
+    }
+
+    internal Task PrepareForNavigationAsync() => _viewModel.OnNavigatedFromAsync();
+
+    /// <summary>
+    /// 键盘快捷键：空格/回车抽取，1-4 切换模式，+/- 调整人数，R 换一个。
+    /// 焦点位于输入控件内时不拦截按键，避免影响正常输入。
+    /// </summary>
+    private void PageRoot_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (IsFocusInInputControl())
+        {
+            return;
+        }
+
+        switch (e.Key)
+        {
+            case VirtualKey.Space:
+            case VirtualKey.Enter:
+                e.Handled = true;
+                _viewModel.DrawCommand.Execute(null);
+                break;
+            case VirtualKey.Number1:
+            case VirtualKey.Number2:
+            case VirtualKey.Number3:
+            case VirtualKey.Number4:
+                e.Handled = true;
+                _viewModel.SelectedDrawModeIndex = (int)(e.Key - VirtualKey.Number1);
+                break;
+            case VirtualKey.Add:
+            case (VirtualKey)187: // '+' 键
+                e.Handled = true;
+                _viewModel.TargetCount = Math.Max(1d, _viewModel.TargetCount + 1d);
+                break;
+            case VirtualKey.Subtract:
+                e.Handled = true;
+                _viewModel.TargetCount = Math.Max(1d, _viewModel.TargetCount - 1d);
+                break;
+            case VirtualKey.R:
+                e.Handled = true;
+                var pending = _viewModel.Results.FirstOrDefault(item => !item.IsCommitted && !item.IsDiscarded);
+                if (pending is not null)
+                {
+                    pending.ReplaceCommand.Execute(null);
+                }
+
+                break;
+        }
+    }
+
+    /// <summary>判断当前焦点是否位于输入类控件（文本框、数字框、组合框、开关、按钮等）。</summary>
+    private static bool IsFocusInInputControl()
+    {
+        var focused = FocusManager.GetFocusedElement() as Control;
+        return focused is TextBox or NumberBox or ComboBox or ToggleSwitch or PasswordBox or Button
+            or Slider or RichEditBox or AutoSuggestBox or ContentDialog;
+    }
+
+    /// <summary>公平性提醒的关闭按钮 = 忽略本次会话的提醒。</summary>
+    private void FairnessReminder_CloseButtonClick(InfoBar sender, object args)
+    {
+        _viewModel.DismissFairnessReminder();
     }
 
     private async void RulesButton_Click(object sender, RoutedEventArgs e)
@@ -55,9 +120,6 @@ public sealed partial class DrawPage : Page
 
     private async void DeletePreset_Click(object sender, RoutedEventArgs e) => await _viewModel.DeleteSelectedPresetAsync();
 
-    private async void PresentationDraw_Click(object sender, RoutedEventArgs e) =>
-        await App.GetService<QuickDrawWindowService>().RequestPresentationDrawAsync();
-
     private async void SavePreset_Click(object sender, RoutedEventArgs e)
     {
         var nameBox = new TextBox { Header = "预设名称", PlaceholderText = "例如：课堂提问" };
@@ -78,6 +140,23 @@ public sealed partial class DrawPage : Page
         catch (ArgumentException exception)
         {
             await App.GetService<DialogService>().ShowAsync("无法保存预设", exception.Message);
+        }
+    }
+
+    private async void ViewSeatMap_Click(object sender, RoutedEventArgs e)
+    {
+        var names = _viewModel.Results
+            .Where(row => !row.IsDiscarded)
+            .Select(row => row.Name)
+            .ToList();
+        if (names.Count == 0)
+        {
+            return;
+        }
+
+        if (App.Window is MainWindow mainWindow)
+        {
+            await mainWindow.NavigateToSeatMapAsync(names);
         }
     }
 

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="PickWeight_App.Pages.Settings.HistoryArchiveSettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid Padding="24" RowSpacing="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <StackPanel x:Name="HeaderPanel" Orientation="Horizontal" Spacing="12">
+            <Button
+                AutomationProperties.Name="返回设置"
+                Background="Transparent"
+                Click="BackButton_Click"
+                Padding="10"
+                ToolTipService.ToolTip="返回">
+                <FontIcon FontSize="16" Glyph="&#xE72B;" />
+            </Button>
+            <StackPanel VerticalAlignment="Center" Spacing="2">
+                <TextBlock Style="{ThemeResource TitleTextBlockStyle}" Text="历史与归档" />
+                <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="历史保留天数、归档数据统计" TextWrapping="Wrap" />
+            </StackPanel>
+        </StackPanel>
+
+        <ScrollViewer
+            Grid.Row="1"
+            HorizontalAlignment="Stretch"
+            HorizontalContentAlignment="Stretch"
+            HorizontalScrollBarVisibility="Disabled"
+            HorizontalScrollMode="Disabled">
+            <StackPanel x:Name="ContentPanel" MaxWidth="860" Spacing="16">
+                <NumberBox Header="历史保留天数" Value="{Binding HistoryRetentionDays, Mode=TwoWay}" Minimum="1" Maximum="3650" SpinButtonPlacementMode="Inline" />
+                <ToggleSwitch Header="统计包含归档数据" IsOn="{Binding HistoryIncludeArchived, Mode=TwoWay}" OffContent="关闭" OnContent="开启" />
+                <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="超过保留天数的历史记录会自动归档；开启后统计页面会连同已归档数据一起加载。" TextWrapping="Wrap" />
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Page>
