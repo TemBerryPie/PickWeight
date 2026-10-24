@@ -112,9 +112,6 @@ public sealed class PreparedDraw
     internal bool AutoResetRecorded { get; set; }
     internal bool WasAutoReset { get; set; }
     internal HashSet<string> CommittedNames { get; } = new(StringComparer.OrdinalIgnoreCase);
-
-    /// <summary>「换一个」替换掉的成员姓名（Trim 后），重建历史时用于恢复 WasReplaced 标记。</summary>
-    internal HashSet<string> ReplacedNames { get; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 public sealed record DrawCommitOutcome(
@@ -338,36 +335,14 @@ public sealed class DrawExecutionService : IDrawExecutionService
                 allowOutsideSelection: true,
                 cancellationToken: cancellationToken);
 
-            // 重建会以当前时刻新建历史条目；恢复原抽取时间并补回替换标记，
-            // 避免部分丢弃/离开页面后历史时间漂移、留痕丢失。
-            if (prepared.HistoryEntry is not null)
+            // 重建会以当前时刻新建历史条目；恢复原抽取时间，避免部分丢弃/
+            // 离开页面后历史时间漂移。
+            if (prepared.HistoryEntry is not null
+                && originalDrawnAt is not null
+                && prepared.HistoryEntry.DrawnAt != originalDrawnAt.Value)
             {
-                if (originalDrawnAt is not null && prepared.HistoryEntry.DrawnAt != originalDrawnAt.Value)
-                {
-                    prepared.HistoryEntry.DrawnAt = originalDrawnAt.Value;
-                    await _data.SaveAsync(cancellationToken);
-                }
-
-                if (prepared.ReplacedNames.Count > 0)
-                {
-                    prepared.HistoryEntry.EnsureRecords();
-                    var restored = false;
-                    foreach (var record in prepared.HistoryEntry.Records)
-                    {
-                        if (!prepared.ReplacedNames.Contains(record.Name.Trim()))
-                        {
-                            continue;
-                        }
-
-                        record.WasReplaced = true;
-                        restored = true;
-                    }
-
-                    if (restored)
-                    {
-                        await _data.SaveAsync(cancellationToken);
-                    }
-                }
+                prepared.HistoryEntry.DrawnAt = originalDrawnAt.Value;
+                await _data.SaveAsync(cancellationToken);
             }
 
             return;
@@ -434,9 +409,6 @@ public sealed class DrawExecutionService : IDrawExecutionService
             return new DrawReplaceOutcome(false, null, [], "替换失败，已恢复原状。");
         }
 
-        // 5. 标记原成员为被替换（历史留痕）
-        MarkReplacedInHistory(prepared, replacedMember.Name);
-
         return new DrawReplaceOutcome(
             true,
             replacement,
@@ -478,24 +450,6 @@ public sealed class DrawExecutionService : IDrawExecutionService
 
         var result = _drawService.Draw(candidates, classroom.Groups, 1, new DrawOptions(mode));
         return result.SelectedMembers.FirstOrDefault();
-    }
-
-    private void MarkReplacedInHistory(PreparedDraw prepared, string replacedName)
-    {
-        prepared.ReplacedNames.Add(replacedName.Trim());
-
-        var entry = prepared.HistoryEntry;
-        if (entry is null)
-        {
-            return;
-        }
-
-        var record = entry.Records.FirstOrDefault(record =>
-            string.Equals(record.Name, replacedName, StringComparison.OrdinalIgnoreCase));
-        if (record is not null)
-        {
-            record.WasReplaced = true;
-        }
     }
 
     /// <summary>
@@ -544,7 +498,20 @@ public sealed class DrawExecutionService : IDrawExecutionService
 
     private static void RestoreClassroomSnapshot(Classroom classroom, Classroom snapshot)
     {
-        classroom.Members = snapshot.Members;
+        // 成员必须原地恢复、保持对象身份稳定：结果卡片与 PreparedDraw.SelectedMembers
+        // 持有成员引用，整体换入克隆列表会让后续提交写到失效对象上（次数静默丢失）。
+        var snapshotByName = snapshot.Members
+            .Where(member => !string.IsNullOrWhiteSpace(member.Name))
+            .GroupBy(member => member.Name.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First());
+        foreach (var member in classroom.Members)
+        {
+            if (snapshotByName.TryGetValue(member.Name.Trim(), out var restored))
+            {
+                member.CopyFrom(restored);
+            }
+        }
+
         classroom.Groups = snapshot.Groups;
         classroom.DrawHistory = snapshot.DrawHistory;
         classroom.DrawPresets = snapshot.DrawPresets;
